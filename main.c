@@ -149,6 +149,9 @@ unsigned short DriveMotorSpeed = PWM_DEFAULT;
 Bool FuelLow = FALSE;
 Bool BatteryLow = FALSE;
 
+//ImageCapture Task
+float ImageCaptureFrequency = 0.0f;
+
 unsigned long LongTimeDelay = 2000000;
 unsigned long ShortTimeDelay = 1000000;
 
@@ -248,6 +251,12 @@ struct WarningAlarmDataStruct {
 };
 typedef struct WarningAlarmDataStruct WarningAlarmData;
 
+struct ImageCaptureDataStruct {
+    float *imageCaptureFrequency;
+};
+typedef struct ImageCaptureDataStruct ImageCaptureData;
+
+
 
 //Controls the execution of the power subsystem
 void powerSubsystemTask(void *powerSubsystemData);
@@ -274,6 +283,9 @@ void consoleKeypadTask(void *consoleKeypadData);
 
 //Controls the execution of the VehicleComms task
 void vehicleCommsTask(void *vehicleCommsData);
+
+//Controls the execution of the ImageCapture task
+void imageCaptureTask(void *imageCaptureData);
 
 //Returns a random integer between low and high inclusively
 int randomInteger(int low, int high);
@@ -1058,6 +1070,11 @@ void vehicleCommsTask(void *vehicleCommsData) {
         lastProcessedInput = LAST_VEHICLE_COMM;
     }
 #endif
+
+}
+
+//Controls the execution of the ImageCapture task
+void imageCaptureTask(void *imageCaptureData) {
 
 }
 

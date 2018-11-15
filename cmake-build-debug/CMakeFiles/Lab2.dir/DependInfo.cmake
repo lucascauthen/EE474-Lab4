@@ -5,6 +5,8 @@ set(CMAKE_DEPENDS_LANGUAGES
 # The set of files for implicit dependencies of each language:
 set(CMAKE_DEPENDS_CHECK_C
   "/Users/admin/Documents/GitHub/EE474-Lab4/main.c" "/Users/admin/Documents/GitHub/EE474-Lab4/cmake-build-debug/CMakeFiles/Lab2.dir/main.c.o"
+  "/Users/admin/Documents/GitHub/EE474-Lab4/testing_sketches/imageCaptureSketch/optfft.c" "/Users/admin/Documents/GitHub/EE474-Lab4/cmake-build-debug/CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/optfft.c.o"
+  "/Users/admin/Documents/GitHub/EE474-Lab4/testing_sketches/imageCaptureSketch/tables.c" "/Users/admin/Documents/GitHub/EE474-Lab4/cmake-build-debug/CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/tables.c.o"
   )
 set(CMAKE_C_COMPILER_ID "AppleClang")
 

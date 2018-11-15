@@ -150,6 +150,60 @@ main.c.s:
 	$(MAKE) -f CMakeFiles/Lab2.dir/build.make CMakeFiles/Lab2.dir/main.c.s
 .PHONY : main.c.s
 
+testing_sketches/imageCaptureSketch/optfft.o: testing_sketches/imageCaptureSketch/optfft.c.o
+
+.PHONY : testing_sketches/imageCaptureSketch/optfft.o
+
+# target to build an object file
+testing_sketches/imageCaptureSketch/optfft.c.o:
+	$(MAKE) -f CMakeFiles/Lab2.dir/build.make CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/optfft.c.o
+.PHONY : testing_sketches/imageCaptureSketch/optfft.c.o
+
+testing_sketches/imageCaptureSketch/optfft.i: testing_sketches/imageCaptureSketch/optfft.c.i
+
+.PHONY : testing_sketches/imageCaptureSketch/optfft.i
+
+# target to preprocess a source file
+testing_sketches/imageCaptureSketch/optfft.c.i:
+	$(MAKE) -f CMakeFiles/Lab2.dir/build.make CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/optfft.c.i
+.PHONY : testing_sketches/imageCaptureSketch/optfft.c.i
+
+testing_sketches/imageCaptureSketch/optfft.s: testing_sketches/imageCaptureSketch/optfft.c.s
+
+.PHONY : testing_sketches/imageCaptureSketch/optfft.s
+
+# target to generate assembly for a file
+testing_sketches/imageCaptureSketch/optfft.c.s:
+	$(MAKE) -f CMakeFiles/Lab2.dir/build.make CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/optfft.c.s
+.PHONY : testing_sketches/imageCaptureSketch/optfft.c.s
+
+testing_sketches/imageCaptureSketch/tables.o: testing_sketches/imageCaptureSketch/tables.c.o
+
+.PHONY : testing_sketches/imageCaptureSketch/tables.o
+
+# target to build an object file
+testing_sketches/imageCaptureSketch/tables.c.o:
+	$(MAKE) -f CMakeFiles/Lab2.dir/build.make CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/tables.c.o
+.PHONY : testing_sketches/imageCaptureSketch/tables.c.o
+
+testing_sketches/imageCaptureSketch/tables.i: testing_sketches/imageCaptureSketch/tables.c.i
+
+.PHONY : testing_sketches/imageCaptureSketch/tables.i
+
+# target to preprocess a source file
+testing_sketches/imageCaptureSketch/tables.c.i:
+	$(MAKE) -f CMakeFiles/Lab2.dir/build.make CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/tables.c.i
+.PHONY : testing_sketches/imageCaptureSketch/tables.c.i
+
+testing_sketches/imageCaptureSketch/tables.s: testing_sketches/imageCaptureSketch/tables.c.s
+
+.PHONY : testing_sketches/imageCaptureSketch/tables.s
+
+# target to generate assembly for a file
+testing_sketches/imageCaptureSketch/tables.c.s:
+	$(MAKE) -f CMakeFiles/Lab2.dir/build.make CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/tables.c.s
+.PHONY : testing_sketches/imageCaptureSketch/tables.c.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -162,6 +216,12 @@ help:
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"
+	@echo "... testing_sketches/imageCaptureSketch/optfft.o"
+	@echo "... testing_sketches/imageCaptureSketch/optfft.i"
+	@echo "... testing_sketches/imageCaptureSketch/optfft.s"
+	@echo "... testing_sketches/imageCaptureSketch/tables.o"
+	@echo "... testing_sketches/imageCaptureSketch/tables.i"
+	@echo "... testing_sketches/imageCaptureSketch/tables.s"
 .PHONY : help
 
 

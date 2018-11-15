@@ -83,6 +83,15 @@
 		<Unit filename="/Users/admin/Documents/GitHub/EE474-Lab4/main.c">
 			<Option target="Lab2"/>
 		</Unit>
+		<Unit filename="/Users/admin/Documents/GitHub/EE474-Lab4/testing_sketches/imageCaptureSketch/optfft.c">
+			<Option target="Lab2"/>
+		</Unit>
+		<Unit filename="/Users/admin/Documents/GitHub/EE474-Lab4/testing_sketches/imageCaptureSketch/optfft.h">
+			<Option target="Lab2"/>
+		</Unit>
+		<Unit filename="/Users/admin/Documents/GitHub/EE474-Lab4/testing_sketches/imageCaptureSketch/tables.c">
+			<Option target="Lab2"/>
+		</Unit>
 		<Unit filename="/Users/admin/Documents/GitHub/EE474-Lab4/CMakeLists.txt">
 			<Option virtualFolder="CMake Files\"/>
 		</Unit>

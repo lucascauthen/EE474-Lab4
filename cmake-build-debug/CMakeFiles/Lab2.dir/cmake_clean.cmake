@@ -1,5 +1,7 @@
 file(REMOVE_RECURSE
   "CMakeFiles/Lab2.dir/main.c.o"
+  "CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/optfft.c.o"
+  "CMakeFiles/Lab2.dir/testing_sketches/imageCaptureSketch/tables.c.o"
   "Lab2.pdb"
   "Lab2"
 )

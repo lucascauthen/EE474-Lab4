@@ -4,7 +4,7 @@
 // SEE RELEVANT COMMENTS IN Elegoo_TFTLCD.h FOR SETUP.
 //Technical support:goodtft@163.com
 
-#define ARDUINO_ON 0
+#define ARDUINO_ON 1
 #define DEBUG 1
 
 #if ARDUINO_ON
@@ -96,13 +96,12 @@ char LAST_VEHICLE_COMM = NO_VEHICLE_COMMAND;
 
 
 unsigned long runDelay = 5000000; //5 Sec
-unsigned long SolarPanelDeployTime = 5000000; //5 Sec
-unsigned long PWMPeriod = 500000;
-const unsigned short PWM_INC = 5;
-const unsigned short PWM_100 = 75;
-const unsigned short PWM_MAX = 75;
-const unsigned short PWM_MIN = 0;
-const unsigned short PWM_DEFAULT = 15;
+#define DEPLOY_RETRACT_TIME SECOND*10
+#define DEFAULT_DUTY_CYCLE 0.1f
+#define PWM_PERIOD SECOND/2
+#define PWM_COUNTER_PERIOD SECOND / 4
+#define SECOND 1000000.0f
+
 long randomGenerationSeed = 98976;
 Bool shouldPrintTaskTiming = TRUE;
 
@@ -149,7 +148,7 @@ Bool SolarPanelDeploy = FALSE;
 Bool SolarPanelRetract = FALSE;
 Bool DriveMotorSpeedInc = FALSE;
 Bool DriveMotorSpeedDec = FALSE;
-unsigned short DriveMotorSpeed = PWM_DEFAULT;
+unsigned short DriveMotorSpeed = (unsigned short) (DEFAULT_DUTY_CYCLE * 10.0f);
 
 //Status Management and Annunciation
 //Same as Power Management
@@ -1131,91 +1130,83 @@ void warningAlarmTask(void *warningAlarmData) {
 
 //Controls the execution of the solar panel control subsystem
 void solarPanelControlTask(void *solarPanelControlData) {
-#if 1
     SolarPanelControlData *data = (SolarPanelControlData *) solarPanelControlData;
-    static Bool runningTask = FALSE;
-    static Bool isDeploy = FALSE;
-    static Bool isPWMOn = TRUE;
-    static unsigned long nextPWMTime = 0;
-    static unsigned long lastOnTime = 0;
-    static unsigned long elapsedTime = 0;
 
-    volatile Bool pwmOutput = FALSE; //Output this to arduino
+    static Bool launchedKeypadTask = FALSE;
+    static Bool isPWMOn = FALSE;
+    static long nextPWMRunTime = 0;
+    static long nextCounterRunTime = 0;
+    static float dutyCycle = DEFAULT_DUTY_CYCLE;
+    static float elapsedTime = 0;
+    Bool outputPWM = FALSE;
 
-    if (*data->driveMotorSpeedInc) {
+    if(*data->driveMotorSpeedInc) {
+#if ARDUINO_ON
+        dutyCycle = min(0.9f, dutyCycle + 0.05f);
+#endif
         *data->driveMotorSpeedInc = FALSE;
-        *data->driveMotorSpeed = unsignedShortMax(*data->driveMotorSpeed + PWM_INC, PWM_MAX);
-    } else if (*data->driveMotorSpeedDec) {
+    }
+    if(*data->driveMotorSpeedDec) {
+#if ARDUINO_ON
+        dutyCycle = max(0.1f, dutyCycle - 0.05f);
+#endif
         *data->driveMotorSpeedDec = FALSE;
-        *data->driveMotorSpeed = unsignedShortMin(*data->driveMotorSpeed - PWM_INC, PWM_MIN);
+    }
+    *data->driveMotorSpeed = (unsigned short) (dutyCycle * 10.0f); //Update this so we can display it somewhere
+
+    if(!launchedKeypadTask) {
+        launchedKeypadTask = TRUE;
+        insertNode(&consoleKeypadTCB);
     }
 
-    if (!runningTask) {
-#if !ARDUINO_ON && DEBUG
-        printf("solarPanelControlTask\n");
-#endif
-        insertNode(&consoleKeypadTCB);
-        runningTask = TRUE;
-        lastOnTime = systemTime();
-        isDeploy = *data->solarPanelDeploy;
-        nextPWMTime = systemTime() +
-                      (unsigned long) (((float) PWMPeriod * ((float) *data->driveMotorSpeed / (float) PWM_100)));
-        elapsedTime = 0;
-#if ARDUINO_ON
-        digitalWrite(PWM_OUTPUT_PIN, LOW); //Reset pwm signal
-#endif
-    } else {
-        if (systemTime() >= nextPWMTime) {
-            //printf("elapsedTime: %d\n", (int) elapsedTime);
-            if (isPWMOn) { //If we are on, we need to go off
-                nextPWMTime = systemTime() + (unsigned long) (((float) PWMPeriod *
-                                                               ((float) (PWM_100 - *data->driveMotorSpeed) /
-                                                                (float) PWM_100)));
-                elapsedTime += systemTime() - lastOnTime;
-            } else { //If we are off we need to go on
-                nextPWMTime = systemTime() + (unsigned long) (((float) PWMPeriod *
-                                                               ((float) *data->driveMotorSpeed / (float) PWM_100)));
-                lastOnTime = systemTime();
-            }
-
-            isPWMOn = !isPWMOn;
-            pwmOutput = isPWMOn;
-#if !ARDUINO_ON
-            printf("PWM Status: %d\n", pwmOutput);
-
-#else
-            Serial.print("PWM Status: ");
-            Serial.println(pwmOutput);
-            digitalWrite(PWM_OUTPUT_PIN, pwmOutput ? HIGH : LOW);
-#endif
+    if(nextPWMRunTime == 0 || systemTime() >= nextPWMRunTime) {
+        if(isPWMOn) {
+            nextPWMRunTime = systemTime() + PWM_PERIOD * (1.0f - dutyCycle);
+            outputPWM = FALSE;
+        } else {
+            nextPWMRunTime = systemTime() + PWM_PERIOD * (dutyCycle);
+            outputPWM = TRUE;
         }
-        if (elapsedTime >= SolarPanelDeployTime) {
-            runningTask = FALSE;
+        isPWMOn = !isPWMOn;
+#if ARDUINO_ON
+        digitalWrite(PWM_OUTPUT_PIN, outputPWM ? HIGH : LOW);
+        Serial.println(outputPWM ? "High" : "Low");
+#endif
+    }
+
+    if(nextCounterRunTime == 0 || systemTime() >= nextCounterRunTime) {
+        nextCounterRunTime = systemTime() + PWM_COUNTER_PERIOD;
+        elapsedTime += PWM_COUNTER_PERIOD * (DEFAULT_DUTY_CYCLE + dutyCycle);
+        if(elapsedTime >= DEPLOY_RETRACT_TIME) {
+            //Interupt
+#if ARDUINO_ON
+            digitalWrite(PWM_OUTPUT_PIN, LOW);
+#endif
+
+            //Reset values
+            launchedKeypadTask = FALSE;
+            isPWMOn = FALSE;
+            nextPWMRunTime = 0;
+            nextCounterRunTime = 0;
+            dutyCycle = DEFAULT_DUTY_CYCLE;
+            elapsedTime = 0;
+
+            //Send stop
             removeNode(&solarPanelControlTCB);
             removeNode(&consoleKeypadTCB);
-            *data->solarPanelState = isDeploy;
-            *data->driveMotorSpeed = PWM_DEFAULT;
-#if ARDUINO_ON
-            digitalWrite(PWM_OUTPUT_PIN, LOW); //Reset pwm signal
-#endif
+
+            //Report the new state of the solar panels
+            *data->solarPanelState = *data->solarPanelDeploy;
         }
     }
-#if ARDUINO_ON
-
-#endif
-#endif
 }
 
 //Controls the execution of the Keypad task
 void consoleKeypadTask(void *consoleKeypadData) {
     ConsoleKeypadData *data = (ConsoleKeypadData *) consoleKeypadData;
-    static char lastProcessedInput = NO_SOLAR_PANEL_INPUT;
 #if ARDUINO_ON
-    if (lastProcessedInput != LAST_SOLAR_PANEL_CONTROL_CHAR) {
-
-        Serial.println("New keypad char");
-
-        char signal = LAST_SOLAR_PANEL_CONTROL_CHAR;
+    char signal = LAST_SOLAR_PANEL_CONTROL_CHAR;
+    if (signal != NO_SOLAR_PANEL_INPUT) {
         if (INC_CHAR == signal) {
             *data->driveMotorSpeedInc = TRUE;
             *data->driveMotorSpeedDec = FALSE;
@@ -1223,7 +1214,7 @@ void consoleKeypadTask(void *consoleKeypadData) {
             *data->driveMotorSpeedInc = FALSE;
             *data->driveMotorSpeedDec = TRUE;
         }
-        lastProcessedInput = LAST_SOLAR_PANEL_CONTROL_CHAR;
+        LAST_SOLAR_PANEL_CONTROL_CHAR = NO_SOLAR_PANEL_INPUT;
     }
 #endif
 }

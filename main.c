@@ -113,18 +113,27 @@ unsigned int ThrusterControl = 0;
 //Power Management
 unsigned int *BatteryLevelPtr;
 unsigned short BatteryLevel = 0;
+unsigned short BatteryTemp = 0;
 unsigned short FuelLevel = 100;
 unsigned short PowerConsumption = 0;
 unsigned short PowerGeneration = 0;
 #if ARDUINO_ON
 unsigned short BatteryPin = A15; //Analog Pin A15 on ATMEGA 2560
+unsigned short BatteryTempPin = A14;
 #else
 unsigned short BatteryPin = 82; //Analog Pin A15 on ATMEGA 2560
+unsigned short BatteryTempPin = 83;
 #endif
 unsigned short BatteryLevelArray[16];
 unsigned short BatteryLevelIndex = 0;
 
+Bool BatteryRapidTemp = FALSE;
+Bool BatteryOverTemp = FALSE;
+unsigned short BatteryTempArray[16];
+unsigned short BatteryTempIndex = 0;
+
 unsigned short BatteryDelay = 600;
+unsigned short BatteryTempDelay = 500;
 
 const unsigned short BATTERY_95 = 34;
 const unsigned short BATTERY_50 = 18;
@@ -186,9 +195,13 @@ struct PowerSubsystemDataStruct {
     Bool *solarPanelDeploy;
     Bool *solarPanelRetract;
     unsigned short *batteryLevel;
+    unsigned short *batteryTemp;
     unsigned short *powerConsumption;
     unsigned short *powerGeneration;
     unsigned short *batteryLevelArrayIndex;
+    unsigned short *batteryTempIndex;
+    Bool *batteryRapidTemp;
+    Bool *batteryOverTemp;
 };
 typedef struct PowerSubsystemDataStruct PowerSubsystemData;
 
@@ -223,6 +236,7 @@ struct SatelliteComsDataStruct {
     unsigned short *powerConsumption;
     unsigned short *powerGeneration;
     unsigned int *thrusterControl;
+    unsigned short *batteryTemp;
 };
 typedef struct SatelliteComsDataStruct SatelliteComsData;
 
@@ -240,6 +254,7 @@ struct ConsoleDisplayDataStruct {
     unsigned short *fuelLevel;
     unsigned short *powerConsumption;
     unsigned short *powerGeneration;
+    unsigned short *batteryTemp;
 };
 typedef struct ConsoleDisplayDataStruct ConsoleDisplayData;
 
@@ -248,6 +263,7 @@ struct WarningAlarmDataStruct {
     Bool *batteryLow;
     unsigned short *batteryLevel;
     unsigned short *fuelLevel;
+    unsigned short *batteryTemp;
 };
 typedef struct WarningAlarmDataStruct WarningAlarmData;
 
@@ -257,11 +273,12 @@ struct ImageCaptureDataStruct {
 typedef struct ImageCaptureDataStruct ImageCaptureData;
 
 
-
 //Controls the execution of the power subsystem
 void powerSubsystemTask(void *powerSubsystemData);
 
 void batteryRead(PowerSubsystemData *data);
+
+void batteryTempRead(PowerSubsystemData *data);
 
 //Controls the execution of the thruster subsystem
 void thrusterSubsystemTask(void *thrusterSubsystemData);
@@ -312,7 +329,7 @@ unsigned short unsignedShortMax(long a, long b) {
 #if !ARDUINO_ON
     return (unsigned short) fmax(a, b);
 #else
-    return max(a,b);
+    return max(a, b);
 #endif
 }
 
@@ -320,7 +337,7 @@ unsigned short unsignedShortMin(long a, long b) {
 #if !ARDUINO_ON
     return (unsigned short) fmin(a, b);
 #else
-    return min(a,b);
+    return min(a, b);
 #endif
 }
 
@@ -438,8 +455,8 @@ void removeNode(TCB *node) {
 //Starts up the system by creating all the objects that are needed to run the system
 void setupSystem() {
     /*
-     * Init the various tasks
-     */
+    * Init the various tasks
+    */
 
     SolarPanelControlData solarPanelControlData;
 
@@ -458,11 +475,15 @@ void setupSystem() {
     PowerSubsystemData powerSubsystemData;
     powerSubsystemData.solarPanelState = &SolarPanelState;
     powerSubsystemData.batteryLevel = &BatteryLevel;
+    powerSubsystemData.batteryTemp = &BatteryTemp;
     powerSubsystemData.powerConsumption = &PowerConsumption;
     powerSubsystemData.powerGeneration = &PowerGeneration;
     powerSubsystemData.solarPanelDeploy = &SolarPanelDeploy;
     powerSubsystemData.solarPanelRetract = &SolarPanelRetract;
     powerSubsystemData.batteryLevelArrayIndex = &BatteryLevelIndex;
+    powerSubsystemData.batteryTempIndex = &BatteryTempIndex;
+    powerSubsystemData.batteryRapidTemp = &BatteryRapidTemp;
+    powerSubsystemData.batteryOverTemp = &BatteryOverTemp;
 
     powerSubsystemTCB.taskDataPtr = (void *) &powerSubsystemData;
     powerSubsystemTCB.task = &powerSubsystemTask;
@@ -510,6 +531,7 @@ void setupSystem() {
     consoleDisplayData.fuelLevel = &FuelLevel;
     consoleDisplayData.powerConsumption = &PowerConsumption;
     consoleDisplayData.powerGeneration = &PowerGeneration;
+    consoleDisplayData.batteryTemp = &BatteryTemp;
 
     consoleDisplayTCB.taskDataPtr = (void *) &consoleDisplayData;
     consoleDisplayTCB.task = &consoleDisplayTask;
@@ -524,6 +546,7 @@ void setupSystem() {
     warningAlarmData.batteryLow = &BatteryLow;
     warningAlarmData.fuelLow = &FuelLow;
     warningAlarmData.fuelLevel = &FuelLevel;
+    warningAlarmData.batteryTemp = &BatteryTemp;
 
     warningAlarmTCB.taskDataPtr = (void *) &warningAlarmData;
     warningAlarmTCB.task = &warningAlarmTask;
@@ -575,11 +598,11 @@ void scheduleTask() {
                 processesEarthInput(input);
             }
             bool didPrint = false;
-            while(Serial1.available() > 0) {
+            while (Serial1.available() > 0) {
                 didPrint = true;
                 Serial.print(Serial1.read());
             }
-            if(didPrint) {
+            if (didPrint) {
                 Serial.println();
             }
 #endif
@@ -616,11 +639,14 @@ void powerSubsystemTask(void *powerSubsystemData) {
     PowerSubsystemData *data = (PowerSubsystemData *) powerSubsystemData;
     static unsigned long nextExecutionTime = 0;
     static unsigned long lastExecutionTime = 0;
-    static unsigned long readBetteryLevelExecuationTime = 0;
+    static unsigned long readBatteryLevelExecutionTime = 0;
+    static unsigned long readBatteryTempExecutionTime = 0;
     if (0 == nextExecutionTime) {
-        readBetteryLevelExecuationTime = systemTime() + BatteryDelay;
+        readBatteryLevelExecutionTime = systemTime() + BatteryDelay;
+        readBatteryTempExecutionTime = systemTime() + BatteryTempDelay;
     }
     static Bool batteryInitialRead = TRUE;
+    static Bool batteryInitialTempRead = TRUE;
     unsigned long t = systemTime();
     if (0 == nextExecutionTime || t > nextExecutionTime) {
 #if !ARDUINO_ON && DEBUG
@@ -685,30 +711,34 @@ void powerSubsystemTask(void *powerSubsystemData) {
 
         //Waits 600us before updating new level to ensure a valid reading
         //Converts analogRead from 50 to 332 for a 1.5V Battery to represent 0 to 36V
-        //50 is an offset of the values, and 0.12766 is the conversion from 282 values to 36V
+        //50 is an offset of the values, and 0.1285714 is the conversion from 280 values to 36V
 
         //Can easily be changed to take measurements every 600 us by adding another boolean
         if (!batteryInitialRead) {
             batteryRead(data);
         }
 
+        if (!batteryInitialTempRead) {
+            batteryTempRead(data);
+        }
+
 
         /* DEPRECATED
         //batteryLevel
         if (*data->solarPanelState) { //If deployed
-            short result = *data->batteryLevel - (*(data->powerConsumption)) + (*(data->powerGeneration));
-            if (result < 0) {
-                *data->batteryLevel = 0;
-            } else {
-                *data->batteryLevel = unsignedShortMin((unsigned short)result, 100);
-            }
+        short result = *data->batteryLevel - (*(data->powerConsumption)) + (*(data->powerGeneration));
+        if (result < 0) {
+        *data->batteryLevel = 0;
+        } else {
+        *data->batteryLevel = unsignedShortMin((unsigned short)result, 100);
+        }
         } else { //If not deplyed
-            int result = *data->batteryLevel - 3 * (*(data->powerConsumption));
-            if (result < 0) {
-                *data->batteryLevel = 0;
-            } else {
-                *data->batteryLevel = (unsigned short)result;
-            }
+        int result = *data->batteryLevel - 3 * (*(data->powerConsumption));
+        if (result < 0) {
+        *data->batteryLevel = 0;
+        } else {
+        *data->batteryLevel = (unsigned short)result;
+        }
         }
         */
 
@@ -716,15 +746,55 @@ void powerSubsystemTask(void *powerSubsystemData) {
         nextExecutionTime = systemTime() + runDelay;
         executionCount++;
     }
-    if (batteryInitialRead && systemTime() >= readBetteryLevelExecuationTime) {
+    if (batteryInitialTempRead && systemTime() >= readBatteryTempExecutionTime) {
+        batteryTempRead(data);
+        batteryInitialRead = FALSE;
+    }
+    if (batteryInitialRead && systemTime() >= readBatteryLevelExecutionTime) {
         batteryRead(data);
         batteryInitialRead = FALSE;
     }
 }
 
+void batteryTempRead(PowerSubsystemData *data) {
+#if ARDUINO_ON
+    unsigned short newVal = (((analogRead(BatteryTempPin) - 50)*0.1286) / 3.25); //- (*(data->powerConsumption)) + (*(data->powerGeneration))
+#else
+    unsigned short newVal = 0;
+#endif
+    if (newVal < 0) {
+        newVal = 0;
+    }
+    int celsius = newVal * 32 + 33;
+    *data->batteryTemp = celsius; //Converts to celsius
+    //Saves the last recordered temp, enables warning if previous recorded value has a 20% diff
+    //delay(500);					  //forced delay to visually see the changes in rapid temp warning
+    BatteryTempArray[*data->batteryTempIndex] = celsius;
+    if (0 != (*data->batteryTempIndex) && (celsius / BatteryTempArray[(*data->batteryTempIndex - 1) % 16] < .8 ||
+                                           celsius / BatteryTempArray[(*data->batteryTempIndex - 1) % 16] > 1.2)) {
+        *data->batteryRapidTemp = TRUE;
+    } else {
+        *data->batteryRapidTemp = FALSE;
+    }
+
+    if (180 < *data->batteryTemp) {
+        *data->batteryOverTemp = TRUE;
+    } else {
+        *data->batteryOverTemp = FALSE;
+    }
+
+#if ARDUINO_ON && DEBUG
+    Serial.print("Battery Temp: ");
+    Serial.print(celsius);
+    Serial.println();
+#elif DEBUG
+    printf("Battery Temp: %d\n", celsius);
+#endif
+}
+
 void batteryRead(PowerSubsystemData *data) {
 #if ARDUINO_ON
-    unsigned short newVal = ((analogRead(BatteryPin) - 50)*0.12766); //- (*(data->powerConsumption)) + (*(data->powerGeneration))
+    unsigned short newVal = ((analogRead(BatteryPin) - 50)*0.1286); //- (*(data->powerConsumption)) + (*(data->powerGeneration))
 #else
     unsigned short newVal = 0;
 #endif
@@ -818,14 +888,14 @@ void satelliteComsTask(void *satelliteComsData) {
 
         //TODO: In future labs, send the following data:
         /*
-            * Fuel Low
-            * Battery Low
-            * Solar Panel State
-            * Battery Level
-            * Fuel Level
-            * Power Consumption
-            * Power Generation
-         */
+        * Fuel Low
+        * Battery Low
+        * Solar Panel State
+        * Battery Level
+        * Fuel Level
+        * Power Consumption
+        * Power Generation
+        */
 
         *(data->thrusterControl) = getRandomThrustSignal();
         nextExecutionTime = systemTime() + runDelay;
@@ -856,6 +926,8 @@ void consoleDisplayTask(void *consoleDisplayData) {
             Serial.println((*data->solarPanelState ? " ON" : "OFF"));
             Serial.print("\tBattery Level: ");
             Serial.println(*data->batteryLevel);
+            Serial.print("\tBattery Temp: ");
+            Serial.println(*data->batteryTemp);
             Serial.print("\tFuel Level: ");
             Serial.println(*data->fuelLevel);
             Serial.print("\tPower Consumption: ");
@@ -867,6 +939,8 @@ void consoleDisplayTask(void *consoleDisplayData) {
             printf((*data->solarPanelState ? " ON" : "OFF"));
             printf("\tBattery Level: ");
             printf("%d", *data->batteryLevel);
+            printf("\tBattery Temp: ");
+            printf("%d", *data->batteryTemp);
             printf("\tFuel Level: ");
             printf("%d", *data->fuelLevel);
             printf("\tPower Consumption: ");
@@ -908,6 +982,12 @@ void warningAlarmTask(void *warningAlarmData) {
 
     unsigned long fuelDelay = (*data->fuelLevel <= FUEL_10) ? LongTimeDelay : ShortTimeDelay;
     int fuelColor = (*data->fuelLevel <= FUEL_10) ? RED : ORANGE;
+    char fuelLevelString[3];
+    unsigned short fuelLevel = 0;
+    fuelLevel = *data->fuelLevel;
+    sprintf(fuelLevelString, "%d", fuelLevel);
+    char printedFuel[9] = "FUEL :";
+    strcat(printedFuel, fuelLevelString);
 
     if (*data->fuelLevel <= FUEL_50) {
         if (fuelStatus == fuelColor) {
@@ -915,51 +995,97 @@ void warningAlarmTask(void *warningAlarmData) {
                 if (hideFuelTime < systemTime()) {
                     showFuelTime = systemTime() + fuelDelay;
                     hideFuelTime = 0;
-                    print("FUEL", 4, NONE, 0);
+                    print(printedFuel, 9, NONE, 0);
                 }
             } else { //If hiding fuel status
                 if (showFuelTime < systemTime()) {
                     hideFuelTime = systemTime() + fuelDelay;
                     showFuelTime = 0;
-                    print("FUEL", 4, fuelColor, 0);
+                    print(printedFuel, 9, fuelColor, 0);
                 }
             }
         } else {
             fuelStatus = fuelColor;
-            print("FUEL", 4, fuelColor, 0);
+            print(printedFuel, 9, fuelColor, 0);
             hideFuelTime = systemTime() + fuelDelay;
         }
     } else if (fuelStatus != GREEN) {
-        print("FUEL", 4, GREEN, 0);
+        print(printedFuel, 9, GREEN, 0);
         fuelStatus = GREEN;
     }
 
     unsigned long batteryDelay = (*data->batteryLevel <= BATTERY_10) ? ShortTimeDelay : LongTimeDelay;
     int batteryColor = (*data->batteryLevel <= BATTERY_10) ? RED : ORANGE;
+    char batLevelString[3];
+    unsigned short batLevel = *data->batteryLevel;
+    sprintf(batLevelString, "%d", batLevel);
+    char printedBat[12] = "BATTERY: ";
+    strcat(printedBat, batLevelString);
     if (*data->batteryLevel <= BATTERY_50) {
         if (batteryStatus == batteryColor) {
             if (showBatteryTime == 0) { //If showing battery status
                 if (hideBatteryTime < systemTime()) {
                     showBatteryTime = systemTime() + batteryDelay;
                     hideBatteryTime = 0;
-                    print("BATTERY", 7, NONE, 1);
+                    print(printedBat, 12, NONE, 1);
                 }
             } else { //If hiding battery status
                 if (showBatteryTime < systemTime()) {
                     hideBatteryTime = systemTime() + batteryDelay;
                     showBatteryTime = 0;
-                    print("BATTERY", 7, batteryColor, 1);
+                    print(printedBat, 12, batteryColor, 1);
                 }
             }
         } else {
             batteryStatus = batteryColor;
-            print("BATTERY", 7, batteryColor, 1);
+            print(printedBat, 12, batteryColor, 1);
             hideBatteryTime = systemTime() + batteryDelay;
         }
     } else if (batteryStatus != GREEN) {
-        print("BATTERY", 7, GREEN, 1);
+        print(printedBat, 12, GREEN, 1);
         batteryStatus = GREEN;
     }
+
+    char batTempString[3];
+    unsigned short batTemp = *data->batteryTemp;
+    sprintf(batTempString, "%d", batTemp);
+    char printedBatTemp[18] = "BATTERY TEMP: ";
+    strcat(printedBatTemp, batTempString);
+    print(printedBatTemp, 18, GREEN, 2);
+
+    /* UNFINISHED WARNING ALARM FOR OVER TEMP
+    unsigned long batteryDelay = (*data->batteryTemp <= BATTERY_10) ? ShortTimeDelay : LongTimeDelay;
+    int batteryColor = (*data->batteryLevel <= BATTERY_10) ? RED : ORANGE;
+    char batLevelString[3];
+    int batLevel = *data->batteryLevel;
+    sprintf(batLevelString, "%d", batLevel);
+    char printedBat[12] = "BATTERY: ";
+    strcat(printedBat, batLevelString);
+    if (*data->batteryLevel <= BATTERY_50) {
+    if (batteryStatus == batteryColor) {
+    if (showBatteryTime == 0) { //If showing battery status
+    if (hideBatteryTime < systemTime()) {
+    showBatteryTime = systemTime() + batteryDelay;
+    hideBatteryTime = 0;
+    print(printedBat, 11, NONE, 1);
+    }
+    } else { //If hiding battery status
+    if (showBatteryTime < systemTime()) {
+    hideBatteryTime = systemTime() + batteryDelay;
+    showBatteryTime = 0;
+    print(printedBat, 11, batteryColor, 1);
+    }
+    }
+    } else {
+    batteryStatus = batteryColor;
+    print(printedBat, 11, batteryColor, 1);
+    hideBatteryTime = systemTime() + batteryDelay;
+    }
+    } else if (batteryStatus != GREEN) {
+    print(printedBat, 11, GREEN, 1);
+    batteryStatus = GREEN;
+    }
+    */
 }
 
 //Controls the execution of the solar panel control subsystem
@@ -991,7 +1117,8 @@ void solarPanelControlTask(void *solarPanelControlData) {
         runningTask = TRUE;
         lastOnTime = systemTime();
         isDeploy = *data->solarPanelDeploy;
-        nextPWMTime = systemTime() + (unsigned long) (((float) PWMPeriod * ((float) *data->driveMotorSpeed / (float) PWM_100)));
+        nextPWMTime = systemTime() +
+                      (unsigned long) (((float) PWMPeriod * ((float) *data->driveMotorSpeed / (float) PWM_100)));
         elapsedTime = 0;
 #if ARDUINO_ON
         digitalWrite(PWM_OUTPUT_PIN, LOW); //Reset pwm signal
@@ -1005,7 +1132,8 @@ void solarPanelControlTask(void *solarPanelControlData) {
                                                                 (float) PWM_100)));
                 elapsedTime += systemTime() - lastOnTime;
             } else { //If we are off we need to go on
-                nextPWMTime = systemTime() + (unsigned long) (((float) PWMPeriod * ((float) *data->driveMotorSpeed / (float) PWM_100)));
+                nextPWMTime = systemTime() + (unsigned long) (((float) PWMPeriod *
+                                                               ((float) *data->driveMotorSpeed / (float) PWM_100)));
                 lastOnTime = systemTime();
             }
 
@@ -1102,7 +1230,7 @@ void print(char str[], int length, int color, int line) {
     //To flash the selected line, you must print exact same string black then recolor
 #if ARDUINO_ON
     for (int i = 0; i < length; i++) {
-        tft.setTextColor(color);
+        tft.setTextColor(color, NONE);
         tft.setCursor(i * 12, line * 16);
         tft.print(str[i]);
     }

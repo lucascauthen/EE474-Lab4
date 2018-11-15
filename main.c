@@ -177,6 +177,7 @@ struct TaskStruct {
     TCB *next;
     TCB *prev;
     void *taskDataPtr;
+    int priority;
 };
 
 TCB *head = NULL;
@@ -317,7 +318,7 @@ void print(char str[], int length, int color, int line);
 void setupSystem();
 
 //Process earth input
-void processesEarthInput(char c);
+void processesEarthInput(char in);
 
 //Prints timing information for a function based on its last runtime
 void printTaskTiming(char taskName[], unsigned long lastRunTime);
@@ -425,11 +426,36 @@ void insertNode(TCB *node) {
         head->next = node;
         head->prev = node;
     } else {
-        tail->next = node;            //add onto tail
-        node->next = head;
-        node->prev = tail;            //connect backwards
-        head->prev = node;
-        tail = node;                    //update tail
+        TCB *cur = head;
+        Bool set = FALSE;
+        int newPriority = node->priority;
+        //Do specific check for head
+        if (head->priority > newPriority) {
+            node->next = cur;
+            node->prev = cur->prev;
+            node->prev->next = node;
+            node->next->prev = node;
+            head = node;
+            set = TRUE;
+        }
+        cur = head->next;
+        while (cur != head && !set) {
+            if (cur->priority > newPriority) {
+                //Found place to insert
+
+                set = TRUE;
+                node->next = cur;
+                node->prev = cur->prev;
+                node->prev->next = node;
+                node->next->prev = node;
+                if(cur == tail) {
+                    tail = node;
+                }
+                break;
+            } else {
+                cur = cur->next;
+            }
+        }
     }
 }
 
@@ -469,6 +495,7 @@ void setupSystem() {
 
     solarPanelControlTCB.taskDataPtr = (void *) &solarPanelControlData;
     solarPanelControlTCB.task = &solarPanelControlTask;
+    solarPanelControlTCB.priority = 5;
 
 
     //Power Subsystem
@@ -487,10 +514,12 @@ void setupSystem() {
 
     powerSubsystemTCB.taskDataPtr = (void *) &powerSubsystemData;
     powerSubsystemTCB.task = &powerSubsystemTask;
+    powerSubsystemTCB.priority = 4;
     powerSubsystemTCB.next = NULL;
     powerSubsystemTCB.prev = NULL;
 
     insertNode(&powerSubsystemTCB);
+    TCB *item = head;
 
     //Thruster Subsystem
     ThrusterSubsystemData thrusterSubsystemData;
@@ -501,8 +530,10 @@ void setupSystem() {
     thrusterSubsystemTCB.task = &thrusterSubsystemTask;
     thrusterSubsystemTCB.next = NULL;
     thrusterSubsystemTCB.prev = NULL;
+    thrusterSubsystemTCB.priority = 3;
 
     insertNode(&thrusterSubsystemTCB);
+    item = head;
 
     //Satellite Comms
     SatelliteComsData satelliteComsData;
@@ -519,8 +550,10 @@ void setupSystem() {
     satelliteComsTCB.task = &satelliteComsTask;
     satelliteComsTCB.next = NULL;
     satelliteComsTCB.prev = NULL;
+    satelliteComsTCB.priority = 2;
 
     insertNode(&satelliteComsTCB);
+    item = head;
 
     //Console Display
     ConsoleDisplayData consoleDisplayData;
@@ -537,8 +570,10 @@ void setupSystem() {
     consoleDisplayTCB.task = &consoleDisplayTask;
     consoleDisplayTCB.next = NULL;
     consoleDisplayTCB.prev = NULL;
+    consoleDisplayTCB.priority = 1;
 
     insertNode(&consoleDisplayTCB);
+    item = head;
 
     //Warning Alarm
     WarningAlarmData warningAlarmData;
@@ -552,8 +587,10 @@ void setupSystem() {
     warningAlarmTCB.task = &warningAlarmTask;
     warningAlarmTCB.next = NULL;
     warningAlarmTCB.prev = NULL;
+    warningAlarmTCB.priority = 1;
 
     insertNode(&warningAlarmTCB);
+    item = head;
 
 
     ConsoleKeypadData consoleKeypadData;
@@ -564,6 +601,7 @@ void setupSystem() {
     consoleKeypadTCB.task = &consoleKeypadTask;
     consoleKeypadTCB.next = NULL;
     consoleKeypadTCB.prev = NULL;
+    consoleKeypadTCB.priority = 1;
 
     //Vehicle Taks
     VehicleCommsData vehicleCommsData;
@@ -573,7 +611,10 @@ void setupSystem() {
     vehicalComsTCB.task = &vehicleCommsTask;
     vehicalComsTCB.next = NULL;
     vehicalComsTCB.prev = NULL;
+    vehicalComsTCB.priority = 1;
+
     insertNode(&vehicalComsTCB);
+    item = head;
 
 
     //Starts the schedule looping

@@ -92,6 +92,8 @@ const char RIGHT_CHAR = 'R';
 const char DRILL_START_CHAR = 'D';
 const char DRILL_STOP_CHAR = 'H';
 const char NO_VEHICLE_COMMAND = '/';
+const char OK_TO_LiftOFF = 'K';
+const char CONFIRM_DOCK = 'C';
 char LAST_VEHICLE_COMM = NO_VEHICLE_COMMAND;
 
 
@@ -669,6 +671,10 @@ void processesEarthInput(char in) {
         LAST_VEHICLE_COMM = in;
     } else if (DRILL_STOP_CHAR == in) {
         LAST_VEHICLE_COMM = in;
+    } else if (OK_TO_LiftOFF == in) {
+		LAST_VEHICLE_COMM = in;
+    } else if (CONFIRM_DOCK == in) {
+		LAST_VEHICLE_COMM = in;
     }
 }
 
@@ -1049,7 +1055,7 @@ void warningAlarmTask(void *warningAlarmData) {
             print(printedFuel, 9, fuelColor, 0);
             hideFuelTime = systemTime() + fuelDelay;
         }
-    } else if (fuelStatus != GREEN) {
+    } else { //still want to update when green above Fuel_50
         print(printedFuel, 9, GREEN, 0);
         fuelStatus = GREEN;
     }

@@ -86,6 +86,7 @@ const char DEC_CHAR = '-';
 const char NO_SOLAR_PANEL_INPUT = '0';
 char LAST_SOLAR_PANEL_CONTROL_CHAR = NO_SOLAR_PANEL_INPUT;
 
+const char ACKNOWLEDGEOVERTEMP_CHAR = 'A';
 const char FORWARD_CHAR = 'F';
 const char BACK_CHAR = 'B';
 const char LEFT_CHAR = 'L';
@@ -136,6 +137,7 @@ Bool BatteryOverTemp = FALSE;
 Bool AcknowledgeOverTemp = FALSE;
 unsigned short BatteryTempArray[16];
 unsigned short BatteryTempIndex = 0;
+unsigned long AlarmCount = 0;
 
 unsigned short BatteryDelay = 600;
 unsigned short BatteryTempDelay = 500;
@@ -214,6 +216,7 @@ struct PowerSubsystemDataStruct {
     unsigned short *powerGeneration;
     unsigned short *batteryLevelArrayIndex;
     unsigned short *batteryTempIndex;
+    unsigned long *alarmCount;
     Bool *batteryRapidTemp;
     Bool *batteryOverTemp;
     Bool *acknowledgeOverTemp;
@@ -267,6 +270,7 @@ struct ConsoleDisplayDataStruct {
     Bool *batteryLow;
     Bool *solarPanelState;
     Bool *batteryRapidTemp;
+    Bool *batteryOverTemp;
     unsigned short *batteryLevel;
     unsigned short *fuelLevel;
     unsigned short *powerConsumption;
@@ -279,9 +283,13 @@ struct WarningAlarmDataStruct {
     Bool *fuelLow;
     Bool *batteryLow;
     Bool *batteryRapidTemp;
+    Bool *batteryOverTemp;
+    Bool *acknowledgeOverTemp;
     unsigned short *batteryLevel;
     unsigned short *fuelLevel;
     unsigned short *batteryTemp;
+    unsigned long *alarmCount;
+
 };
 typedef struct WarningAlarmDataStruct WarningAlarmData;
 
@@ -539,6 +547,7 @@ void setupSystem() {
     powerSubsystemData.batteryRapidTemp = &BatteryRapidTemp;
     powerSubsystemData.batteryOverTemp = &BatteryOverTemp;
     powerSubsystemData.acknowledgeOverTemp = &AcknowledgeOverTemp;
+    powerSubsystemData.alarmCount = &AlarmCount;
 
     powerSubsystemTCB.taskDataPtr = (void *) &powerSubsystemData;
     powerSubsystemTCB.task = &powerSubsystemTask;
@@ -594,6 +603,7 @@ void setupSystem() {
     consoleDisplayData.powerGeneration = &PowerGeneration;
     consoleDisplayData.batteryTemp = &BatteryTemp;
     consoleDisplayData.batteryRapidTemp = &BatteryRapidTemp;
+    consoleDisplayData.batteryOverTemp = &BatteryOverTemp;
 
     consoleDisplayTCB.taskDataPtr = (void *) &consoleDisplayData;
     consoleDisplayTCB.task = &consoleDisplayTask;
@@ -612,6 +622,9 @@ void setupSystem() {
     warningAlarmData.fuelLevel = &FuelLevel;
     warningAlarmData.batteryTemp = &BatteryTemp;
     warningAlarmData.batteryRapidTemp = &BatteryRapidTemp;
+    warningAlarmData.alarmCount = &AlarmCount;
+    warningAlarmData.batteryOverTemp = &BatteryOverTemp;
+    warningAlarmData.acknowledgeOverTemp = &AcknowledgeOverTemp;
 
     warningAlarmTCB.taskDataPtr = (void *) &warningAlarmData;
     warningAlarmTCB.task = &warningAlarmTask;
@@ -726,6 +739,8 @@ void processesEarthInput(char in) {
         LAST_VEHICLE_COMM = in;
     } else if (DRILL_STOP_CHAR == in) {
         LAST_VEHICLE_COMM = in;
+    } else if (ACKNOWLEDGEOVERTEMP_CHAR == in ) {
+        AcknowledgeOverTemp = TRUE;
     }
 }
 
@@ -828,7 +843,7 @@ void powerSubsystemTask(void *powerSubsystemData) {
 
         nextExecutionTime = systemTime() + runDelay;
         executionCount++;
-        
+
     }
    // if (batteryInitialTempRead && systemTime() >= readBatteryTempExecutionTime) {
    //     batteryTempRead(data);
@@ -855,7 +870,7 @@ void batteryTempRead(PowerSubsystemData *data) {
     //Saves the last recordered temp, enables warning if previous recorded value has a 20% diff
                       //forced delay to visually see the changes in rapid temp warning
     BatteryTempArray[*data->batteryTempIndex] = celsius;
-    if ((0 != *data->batteryTempIndex) && (BatteryTempArray[*data->batteryTempIndex] > 0) && 
+    if ((0 != *data->batteryTempIndex) && (BatteryTempArray[*data->batteryTempIndex] > 0) &&
                                         ((celsius / (float) BatteryTempArray[*data->batteryTempIndex-1] < .8) ||
                                            (celsius / (float) BatteryTempArray[*data->batteryTempIndex-1] > 1.2))) {
         *data->batteryRapidTemp = TRUE;
@@ -866,21 +881,14 @@ void batteryTempRead(PowerSubsystemData *data) {
     if ((BatteryTempArray[*data->batteryTempIndex] > 180) && (BatteryTempArray[*data->batteryTempIndex] != BatteryTempArray[*data->batteryTempIndex-1])) {
         *data->batteryOverTemp = TRUE;
         *data->acknowledgeOverTemp = FALSE;
-        //*data->initialAlarm = TRUE;
+        *data->alarmCount = 0;
     } else if (*data->acknowledgeOverTemp) {
         *data->batteryOverTemp = FALSE;
         *data->acknowledgeOverTemp = FALSE;
+        *data->alarmCount = 0;
     }
 
     *data->batteryTempIndex = (*data->batteryTempIndex + 1) % 16;
-
-#if ARDUINO_ON && DEBUG
-    Serial.print("Battery Temp: ");
-    Serial.print(celsius);
-    Serial.println();
-#elif DEBUG
-    printf("Battery Temp: %d\n", celsius);
-#endif
 }
 
 void batteryRead(PowerSubsystemData *data) {
@@ -1021,12 +1029,15 @@ void consoleDisplayTask(void *consoleDisplayData) {
             Serial.println(*data->batteryTemp);
             Serial.print("\tBattery Rapid Temp: ");
             Serial.println(*data->batteryRapidTemp ? " TRUE" : "FALSE");
+            Serial.print("\tBattery Over Temp: ");
+            Serial.println(*data->batteryOverTemp ? "TRUE" : "FALSE");
             Serial.print("\tFuel Level: ");
             Serial.println(*data->fuelLevel);
             Serial.print("\tPower Consumption: ");
             Serial.println(*data->powerConsumption);
             Serial.print("\tPower Generation: ");
             Serial.println(*data->powerGeneration);
+            Serial.println();
 #elif 0
             printf("\tSolar Panel State: ");
             printf((*data->solarPanelState ? " ON" : "OFF"));
@@ -1040,8 +1051,8 @@ void consoleDisplayTask(void *consoleDisplayData) {
             printf("%d", *data->powerConsumption);
             printf("\tPower Generation: ");
             printf("%d\n", *data->powerGeneration);
-#endif
 
+#endif
         } else {
 #if ARDUINO_ON
             if (*data->fuelLow == TRUE) {
@@ -1154,19 +1165,37 @@ void warningAlarmTask(void *warningAlarmData) {
         print("Battery Rapid Temp", 18, NONE, 3);
     }
 
-    /* UNFINISHED WARNING ALARM FOR OVERTEMP
-
-    if (*data->batteryOverTemp && !acknowledgeTemp) {
-        if (initialAlarm) {
-            
-        } else { //Cycle Pattern for Past 15 seconds
-
-        } 
-    } else {
-        print("TEMPERATURE", 11, NONE, 4);
+    static unsigned long nextExecutionTime = 0;
+    static Bool FLASH = TRUE;
+    if (nextExecutionTime == 0) {
+        nextExecutionTime = systemTime() + 500;
     }
-
-    */
+    if (systemTime() >= nextExecutionTime) {
+        if (*data->batteryOverTemp && !(*data->acknowledgeOverTemp)) {
+            if (*data->alarmCount < 15) {
+                *data->alarmCount++;
+                print("TEMPERATURE", 11, NONE, 4);
+                nextExecutionTime = systemTime() + 1000000;
+            } else { //Cycle Pattern for Past 15 seconds
+                *data->alarmCount++;
+                if (*data->alarmCount % 10 > 5) {
+                    if (FLASH) {
+                        print("TEMPERATURE", 11, RED, 4);
+                        FLASH = FALSE;
+                    } else {
+                        FLASH = TRUE;
+                        print("TEMPERATURE", 11, NONE, 4);
+                    }
+                    nextExecutionTime = systemTime() + 100000;
+                } else { //alarmCount % 10 < 5
+                    print("TEMPERATURE", 11, RED, 4);
+                    nextExecutionTime = systemTime() + 1000000;
+                }
+            }
+        } else {
+            print("TEMPERATURE", 11, NONE, 4);
+        }
+    }
 }
 
 //Controls the execution of the solar panel control subsystem

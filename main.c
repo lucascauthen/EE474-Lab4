@@ -1311,7 +1311,7 @@ void imageCaptureTask(void *imageCaptureData) {
 void transportDistanceTask(void *transportDistanceData) {
     TransportDistanceData *data = (TransportDistanceData *) transportDistanceData;
 
-    
+
 
 }
 

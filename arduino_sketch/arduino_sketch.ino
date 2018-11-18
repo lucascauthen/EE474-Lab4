@@ -5,7 +5,7 @@
 //Technical support:goodtft@163.com
 
 #define ARDUINO_ON 1
-#define DEBUG 1
+#define DEBUG 0
 
 #if ARDUINO_ON
 
@@ -95,13 +95,13 @@ const char DRILL_STOP_CHAR = 'H';
 const char NO_VEHICLE_COMMAND = '/';
 char LAST_VEHICLE_COMM = NO_VEHICLE_COMMAND;
 
-
+const float SECOND = 1000000.0f;
+const float PWM_COUNTER_PERIOD = SECOND / 4.0f;
 unsigned long runDelay = 5000000; //5 Sec
 #define DEPLOY_RETRACT_TIME SECOND*10
-#define DEFAULT_DUTY_CYCLE 0.1f
-#define PWM_PERIOD SECOND/2
-#define PWM_COUNTER_PERIOD SECOND / 4
-#define SECOND 1000000.0f
+const float DEFAULT_DUTY_CYCLE = 0.5f;
+const float PWM_PERIOD = SECOND / 2.0f;
+const unsigned long WARNING_ALARM_PERIOD = (const unsigned long) (SECOND / 4.0f);
 #define SAMPLING_FREQUENCY  7500.0f
 #define IMAGE_CAPTURE_SAMPLES 256
 #define SAMPLING_DELAY  (1.0f/SAMPLING_FREQUENCY)*SECOND
@@ -493,14 +493,32 @@ void removeNode(TCB *node) {
         tail = NULL;
     } else if (node == head) {
         node->next->prev = tail;        //chop off head
+        node->prev->next = node->next;
         head = node->next;            //reassign head
     } else if (node == tail) {
         node->prev->next = head;        //chop off tail
+        node->next->prev = node->prev;
         tail = node->prev;            //reassign tail
     } else {
         node->next->prev = node->prev;    //clip next
         node->prev->next = node->next;    //clip prev
     }
+}
+
+Bool contains(TCB *node) {
+    TCB *cur = head;
+    if (cur == node) {
+        return TRUE;
+    }
+    cur = cur->next;
+    while (cur != head) {
+        if (cur == node) {
+            return TRUE;
+        }
+        cur = cur->next;
+    }
+
+    return FALSE;
 }
 
 
@@ -522,8 +540,7 @@ void setupSystem() {
 
     solarPanelControlTCB.taskDataPtr = (void *) &solarPanelControlData;
     solarPanelControlTCB.task = &solarPanelControlTask;
-    solarPanelControlTCB.priority = 5;
-
+    solarPanelControlTCB.priority = 1;
 
     //Power Subsystem
     PowerSubsystemData powerSubsystemData;
@@ -547,7 +564,6 @@ void setupSystem() {
     powerSubsystemTCB.prev = NULL;
 
     insertNode(&powerSubsystemTCB);
-
 
     //Thruster Subsystem
     ThrusterSubsystemData thrusterSubsystemData;
@@ -619,7 +635,7 @@ void setupSystem() {
     warningAlarmTCB.prev = NULL;
     warningAlarmTCB.priority = 1;
 
-    insertNode(&warningAlarmTCB);
+    //insertNode(&warningAlarmTCB);
 
 
     ConsoleKeypadData consoleKeypadData;
@@ -643,7 +659,7 @@ void setupSystem() {
     vehicalComsTCB.prev = NULL;
     vehicalComsTCB.priority = 1;
 
-    insertNode(&vehicalComsTCB);
+    //insertNode(&vehicalComsTCB);
 
 
     Samples = malloc(IMAGE_CAPTURE_SAMPLES * sizeof *Samples);
@@ -661,7 +677,7 @@ void setupSystem() {
     imageCaptureTCB.prev = NULL;
     imageCaptureTCB.priority = 1;
 
-    insertNode(&imageCaptureTCB);
+    //insertNode(&imageCaptureTCB);
 
 
     TransportDistanceData transportDistanceData;
@@ -745,6 +761,10 @@ void powerSubsystemTask(void *powerSubsystemData) {
     static Bool batteryInitialRead = TRUE;
     static Bool batteryInitialTempRead = TRUE;
     unsigned long t = systemTime();
+    if (systemTime() >= readBatteryTempExecutionTime) {
+        batteryTempRead(data);
+        readBatteryTempExecutionTime = systemTime() + BatteryTempDelay;
+    }
     if (0 == nextExecutionTime || t > nextExecutionTime) {
 #if !ARDUINO_ON && DEBUG
         printf("powerSubsystemTask\n");
@@ -777,7 +797,7 @@ void powerSubsystemTask(void *powerSubsystemData) {
         //powerGeneration
         if (*data->solarPanelState) {
             if (*data->batteryLevel > BATTERY_95) {
-                if (*data->solarPanelRetract) {  //If we have not already signalled to retract
+                if (!contains(&solarPanelControlTCB)) {  //If we have not already signalled to retract
                     insertNode(&solarPanelControlTCB); //Start the task
                 }
                 *data->solarPanelDeploy = FALSE;
@@ -798,8 +818,15 @@ void powerSubsystemTask(void *powerSubsystemData) {
             }
         } else {
             if (*data->batteryLevel <= BATTERY_10) {
-                if (!*data->solarPanelDeploy) { //If we have not already signalled to deploy
+                if (!contains(&solarPanelControlTCB)) { //If we have not already signalled to deploy
+#if ARDUINO_ON
+                    Serial.println("Running deploy!");
+#endif
                     insertNode(&solarPanelControlTCB); //Add the task
+                } else {
+#if ARDUINO_ON
+                    Serial.println("NOT deploy!");
+#endif
                 }
                 *data->solarPanelDeploy = TRUE;
                 *data->solarPanelRetract = FALSE;
@@ -815,19 +842,14 @@ void powerSubsystemTask(void *powerSubsystemData) {
             batteryRead(data);
         }
 
-        //Waits 500us before updating new level to ensure a valid reading
-        if (systemTime() >= readBatteryTempExecutionTime) {
-            batteryTempRead(data);
-        }
-        readBatteryTempExecutionTime = systemTime() + BatteryTempDelay;
         nextExecutionTime = systemTime() + runDelay;
         executionCount++;
-        
+
     }
-   // if (batteryInitialTempRead && systemTime() >= readBatteryTempExecutionTime) {
-   //     batteryTempRead(data);
-   //     batteryInitialRead = FALSE;
-   // }
+    // if (batteryInitialTempRead && systemTime() >= readBatteryTempExecutionTime) {
+    //     batteryTempRead(data);
+    //     batteryInitialRead = FALSE;
+    // }
     if (batteryInitialRead && systemTime() >= readBatteryLevelExecutionTime) {
         batteryRead(data);
         batteryInitialRead = FALSE;
@@ -844,19 +866,21 @@ void batteryTempRead(PowerSubsystemData *data) {
         newVal = 0;
     }
 
-    int celsius = newVal * 32 + 33;
-    *data->batteryTemp = celsius; //Converts to celsius
+    float celsius = newVal * 32 + 33;
+    *data->batteryTemp = (short) celsius; //Converts to celsius
     //Saves the last recordered temp, enables warning if previous recorded value has a 20% diff
-                      //forced delay to visually see the changes in rapid temp warning
+    //forced delay to visually see the changes in rapid temp warning
     BatteryTempArray[*data->batteryTempIndex] = celsius;
-    if ((0 != (*data->batteryTempIndex)) && (BatteryTempArray[*data->batteryTempIndex-1] > 0) && ((celsius / BatteryTempArray[(*data->batteryTempIndex - 1) % 16] < .8) ||
-                                           (celsius / BatteryTempArray[(*data->batteryTempIndex - 1) % 16] > 1.2))) {
+    if ((0 != *data->batteryTempIndex) && (BatteryTempArray[*data->batteryTempIndex] > 0) &&
+        ((celsius / (float) BatteryTempArray[*data->batteryTempIndex - 1] < .8) ||
+         (celsius / (float) BatteryTempArray[*data->batteryTempIndex - 1] > 1.2))) {
         *data->batteryRapidTemp = TRUE;
     } else {
         *data->batteryRapidTemp = FALSE;
     }
 
-    if ((BatteryTempArray[*data->batteryTempIndex] > 180) && (BatteryTempArray[*data->batteryTempIndex] != BatteryTempArray[*data->batteryTempIndex-1])) {
+    if ((BatteryTempArray[*data->batteryTempIndex] > 180) &&
+        (BatteryTempArray[*data->batteryTempIndex] != BatteryTempArray[*data->batteryTempIndex - 1])) {
         *data->batteryOverTemp = TRUE;
         *data->acknowledgeOverTemp = FALSE;
         //*data->initialAlarm = TRUE;
@@ -864,6 +888,8 @@ void batteryTempRead(PowerSubsystemData *data) {
         *data->batteryOverTemp = FALSE;
         *data->acknowledgeOverTemp = FALSE;
     }
+
+    *data->batteryTempIndex = (*data->batteryTempIndex + 1) % 16;
 
 #if ARDUINO_ON && DEBUG
     Serial.print("Battery Temp: ");
@@ -1054,117 +1080,120 @@ void consoleDisplayTask(void *consoleDisplayData) {
 //Controls the execution of the warning alarm subsystem
 void warningAlarmTask(void *warningAlarmData) {
     WarningAlarmData *data = (WarningAlarmData *) warningAlarmData;
-    static int fuelStatus = NONE;
-    static int batteryStatus = NONE;
-    static unsigned long hideFuelTime = 0;
-    static unsigned long showFuelTime = 0;
-    static unsigned long hideBatteryTime = 0;
-    static unsigned long showBatteryTime = 0;
+    static unsigned long nextRunTime = 0;
 
-    *data->fuelLow = *data->fuelLevel <= FUEL_10 ? TRUE : FALSE;
-    *data->batteryLow = *data->batteryLow <= BATTERY_10 ? TRUE : FALSE;
+    if (0 == nextRunTime || systemTime() > nextRunTime) {
+        nextRunTime = systemTime() + WARNING_ALARM_PERIOD;
+        static int fuelStatus = NONE;
+        static int batteryStatus = NONE;
+        static unsigned long hideFuelTime = 0;
+        static unsigned long showFuelTime = 0;
+        static unsigned long hideBatteryTime = 0;
+        static unsigned long showBatteryTime = 0;
 
-    unsigned long fuelDelay = (*data->fuelLevel <= FUEL_10) ? LongTimeDelay : ShortTimeDelay;
-    int fuelColor = (*data->fuelLevel <= FUEL_10) ? RED : ORANGE;
-    char fuelLevelString[3];
-    unsigned short fuelLevel = 0;
-    fuelLevel = *data->fuelLevel;
-    sprintf(fuelLevelString, "%d", fuelLevel);
-    char printedFuel[9] = "FUEL :";
-    strcat(printedFuel, fuelLevelString);
+        *data->fuelLow = *data->fuelLevel <= FUEL_10 ? TRUE : FALSE;
+        *data->batteryLow = *data->batteryLow <= BATTERY_10 ? TRUE : FALSE;
 
-    if (*data->fuelLevel <= FUEL_50) {
-        if (fuelStatus == fuelColor) {
-            if (showFuelTime == 0) { //If showing fuel status
-                if (hideFuelTime < systemTime()) {
-                    showFuelTime = systemTime() + fuelDelay;
-                    hideFuelTime = 0;
-                    print(printedFuel, 9, NONE, 0);
+        unsigned long fuelDelay = (*data->fuelLevel <= FUEL_10) ? LongTimeDelay : ShortTimeDelay;
+        int fuelColor = (*data->fuelLevel <= FUEL_10) ? RED : ORANGE;
+        char fuelLevelString[3];
+        unsigned short fuelLevel = 0;
+        fuelLevel = *data->fuelLevel;
+        sprintf(fuelLevelString, "%d", fuelLevel);
+        char printedFuel[9] = "FUEL :";
+        strcat(printedFuel, fuelLevelString);
+
+        if (*data->fuelLevel <= FUEL_50) {
+            if (fuelStatus == fuelColor) {
+                if (showFuelTime == 0) { //If showing fuel status
+                    if (hideFuelTime < systemTime()) {
+                        showFuelTime = systemTime() + fuelDelay;
+                        hideFuelTime = 0;
+                        print(printedFuel, 9, NONE, 0);
+                    }
+                } else { //If hiding fuel status
+                    if (showFuelTime < systemTime()) {
+                        hideFuelTime = systemTime() + fuelDelay;
+                        showFuelTime = 0;
+                        print(printedFuel, 9, fuelColor, 0);
+                    }
                 }
-            } else { //If hiding fuel status
-                if (showFuelTime < systemTime()) {
-                    hideFuelTime = systemTime() + fuelDelay;
-                    showFuelTime = 0;
-                    print(printedFuel, 9, fuelColor, 0);
-                }
+            } else {
+                fuelStatus = fuelColor;
+                print(printedFuel, 9, fuelColor, 0);
+                hideFuelTime = systemTime() + fuelDelay;
             }
         } else {
-            fuelStatus = fuelColor;
-            print(printedFuel, 9, fuelColor, 0);
-            hideFuelTime = systemTime() + fuelDelay;
+            print(printedFuel, 9, GREEN, 0);
+            fuelStatus = GREEN;
         }
-    } else if (fuelStatus != GREEN) {
-        print(printedFuel, 9, GREEN, 0);
-        fuelStatus = GREEN;
-    }
 
-    //DISPLAY BATTERY LEVEL 0-36V Changing Color depending on level
-    unsigned long batteryDelay = (*data->batteryLevel <= BATTERY_10) ? ShortTimeDelay : LongTimeDelay;
-    int batteryColor = (*data->batteryLevel <= BATTERY_10) ? RED : ORANGE;
-    char batLevelString[3];
-    unsigned short batLevel = *data->batteryLevel;
-    sprintf(batLevelString, "%d", batLevel);
-    char printedBat[12] = "BATTERY: ";
-    strcat(printedBat, batLevelString);
-    if (*data->batteryLevel <= BATTERY_50) {
-        if (batteryStatus == batteryColor) {
-            if (showBatteryTime == 0) { //If showing battery status
-                if (hideBatteryTime < systemTime()) {
-                    showBatteryTime = systemTime() + batteryDelay;
-                    hideBatteryTime = 0;
-                    print(printedBat, 12, NONE, 1);
+        //DISPLAY BATTERY LEVEL 0-36V Changing Color depending on level
+        unsigned long batteryDelay = (*data->batteryLevel <= BATTERY_10) ? ShortTimeDelay : LongTimeDelay;
+        int batteryColor = (*data->batteryLevel <= BATTERY_10) ? RED : ORANGE;
+        char batLevelString[3];
+        unsigned short batLevel = *data->batteryLevel;
+        sprintf(batLevelString, "%d", batLevel);
+        char printedBat[12] = "BATTERY: ";
+        strcat(printedBat, batLevelString);
+        if (*data->batteryLevel <= BATTERY_50) {
+            if (batteryStatus == batteryColor) {
+                if (showBatteryTime == 0) { //If showing battery status
+                    if (hideBatteryTime < systemTime()) {
+                        showBatteryTime = systemTime() + batteryDelay;
+                        hideBatteryTime = 0;
+                        print(printedBat, 12, NONE, 1);
+                    }
+                } else { //If hiding battery status
+                    if (showBatteryTime < systemTime()) {
+                        hideBatteryTime = systemTime() + batteryDelay;
+                        showBatteryTime = 0;
+                        print(printedBat, 12, batteryColor, 1);
+                    }
                 }
-            } else { //If hiding battery status
-                if (showBatteryTime < systemTime()) {
-                    hideBatteryTime = systemTime() + batteryDelay;
-                    showBatteryTime = 0;
-                    print(printedBat, 12, batteryColor, 1);
-                }
+            } else {
+                batteryStatus = batteryColor;
+                print(printedBat, 12, batteryColor, 1);
+                hideBatteryTime = systemTime() + batteryDelay;
+            }
+        } else if (batteryStatus != GREEN) {
+            print(printedBat, 12, GREEN, 1);
+            batteryStatus = GREEN;
+        }
+
+        //DISPLAYS BATTERY TEMP
+        char batTempString[3];
+        unsigned short batTemp = *data->batteryTemp;
+        sprintf(batTempString, "%d", batTemp);
+        char printedBatTemp[18] = "BATTERY TEMP: ";
+        strcat(printedBatTemp, batTempString);
+        print(printedBatTemp, 18, GREEN, 2);
+
+        if (*data->batteryRapidTemp) {
+            print("Battery Rapid Temp", 18, RED, 3);
+        } else {
+            print("Battery Rapid Temp", 18, NONE, 3);
+        }
+
+        /* UNFINISHED WARNING ALARM FOR OVERTEMP
+
+        if (*data->batteryOverTemp && !acknowledgeTemp) {
+            if (initialAlarm) {
+
+            } else { //Cycle Pattern for Past 15 seconds
+
             }
         } else {
-            batteryStatus = batteryColor;
-            print(printedBat, 12, batteryColor, 1);
-            hideBatteryTime = systemTime() + batteryDelay;
+            print("TEMPERATURE", 11, NONE, 4);
         }
-    } else if (batteryStatus != GREEN) {
-        print(printedBat, 12, GREEN, 1);
-        batteryStatus = GREEN;
+
+        */
     }
-
-    //DISPLAYS BATTERY TEMP
-    char batTempString[3];
-    unsigned short batTemp = *data->batteryTemp;
-    sprintf(batTempString, "%d", batTemp);
-    char printedBatTemp[18] = "BATTERY TEMP: ";
-    strcat(printedBatTemp, batTempString);
-    print(printedBatTemp, 18, GREEN, 2);
-
-    if (*data->batteryRapidTemp) {
-        print("Battery Rapid Temp", 18, RED, 3);
-    } else {
-        print("Battery Rapid Temp", 18, NONE, 3);
-    }
-
-    /* UNFINISHED WARNING ALARM FOR OVERTEMP
-
-    if (*data->batteryOverTemp && !acknowledgeTemp) {
-        if (initialAlarm) {
-            
-        } else { //Cycle Pattern for Past 15 seconds
-
-        } 
-    } else {
-        print("TEMPERATURE", 11, NONE, 4);
-    }
-
-    */
 }
 
 //Controls the execution of the solar panel control subsystem
 void solarPanelControlTask(void *solarPanelControlData) {
     SolarPanelControlData *data = (SolarPanelControlData *) solarPanelControlData;
-
-    static Bool launchedKeypadTask = FALSE;
     static Bool isPWMOn = FALSE;
     static long nextPWMRunTime = 0;
     static long nextCounterRunTime = 0;
@@ -1174,7 +1203,7 @@ void solarPanelControlTask(void *solarPanelControlData) {
 
     if (*data->driveMotorSpeedInc) {
 #if ARDUINO_ON
-        dutyCycle = min(0.9f, dutyCycle + 0.05f);
+        dutyCycle = min(0.9f, dutyCycle + 0.2f);
 #endif
         *data->driveMotorSpeedInc = FALSE;
     }
@@ -1186,23 +1215,22 @@ void solarPanelControlTask(void *solarPanelControlData) {
     }
     *data->driveMotorSpeed = (unsigned short) (dutyCycle * 10.0f); //Update this so we can display it somewhere
 
-    if (!launchedKeypadTask) {
-        launchedKeypadTask = TRUE;
+    if (!contains(&consoleKeypadTCB)) {
         insertNode(&consoleKeypadTCB);
     }
 
     if (nextPWMRunTime == 0 || systemTime() >= nextPWMRunTime) {
         if (isPWMOn) {
-            nextPWMRunTime = systemTime() + PWM_PERIOD * (1.0f - dutyCycle);
-            outputPWM = FALSE;
+            nextPWMRunTime = systemTime() + (unsigned long) (PWM_PERIOD * (1.0f - dutyCycle));
         } else {
-            nextPWMRunTime = systemTime() + PWM_PERIOD * (dutyCycle);
-            outputPWM = TRUE;
+            nextPWMRunTime = systemTime() + (unsigned long) (PWM_PERIOD * (dutyCycle));
         }
         isPWMOn = !isPWMOn;
 #if ARDUINO_ON
-        digitalWrite(PWM_OUTPUT_PIN, outputPWM ? HIGH : LOW);
-        Serial.println(outputPWM ? "High" : "Low");
+        Serial.print("Next run time:");
+        Serial.println((float)(nextPWMRunTime - systemTime()) / SECOND);
+        digitalWrite(PWM_OUTPUT_PIN, isPWMOn);
+        //Serial.println(outputPWM ? "High" : "Low");
 #endif
     }
 
@@ -1216,7 +1244,6 @@ void solarPanelControlTask(void *solarPanelControlData) {
 #endif
 
             //Reset values
-            launchedKeypadTask = FALSE;
             isPWMOn = FALSE;
             nextPWMRunTime = 0;
             nextCounterRunTime = 0;
@@ -1294,7 +1321,6 @@ void imageCaptureTask(void *imageCaptureData) {
 //Controls the execution of the TransportDistance task
 void transportDistanceTask(void *transportDistanceData) {
     TransportDistanceData *data = (TransportDistanceData *) transportDistanceData;
-
 
 
 }

@@ -265,6 +265,7 @@ struct ConsoleDisplayDataStruct {
     Bool *fuelLow;
     Bool *batteryLow;
     Bool *solarPanelState;
+    Bool *batteryRapidTemp;
     unsigned short *batteryLevel;
     unsigned short *fuelLevel;
     unsigned short *powerConsumption;

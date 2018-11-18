@@ -4,7 +4,7 @@
 // SEE RELEVANT COMMENTS IN Elegoo_TFTLCD.h FOR SETUP.
 //Technical support:goodtft@163.com
 
-#define ARDUINO_ON 1
+#define ARDUINO_ON 0
 #define DEBUG 1
 
 #if ARDUINO_ON
@@ -22,6 +22,7 @@
 #include <limits.h> // Used for random number generation
 #include <time.h>
 #include <stdlib.h>
+#include "testing_sketches/imageCaptureSketch/optfft.h"
 
 // The control pins for the LCD can be assigned to any digital or
 // analog pins...but we'll use the analog pins as this allows us to
@@ -101,6 +102,9 @@ unsigned long runDelay = 5000000; //5 Sec
 #define PWM_PERIOD SECOND/2
 #define PWM_COUNTER_PERIOD SECOND / 4
 #define SECOND 1000000.0f
+#define SAMPLING_FREQUENCY  7500.0f
+#define IMAGE_CAPTURE_SAMPLES 256
+#define SAMPLING_DELAY  (1.0f/SAMPLING_FREQUENCY)*SECOND
 
 long randomGenerationSeed = 98976;
 Bool shouldPrintTaskTiming = TRUE;
@@ -158,7 +162,13 @@ Bool FuelLow = FALSE;
 Bool BatteryLow = FALSE;
 
 //ImageCapture Task
-float ImageCaptureFrequency = 0.0f;
+int ImageCaptureFrequency = 0;
+signed int *Samples;
+signed int *Zeros;
+unsigned short SamplingIndex;
+
+//Transport Distance
+unsigned short TransportDistance = 0;
 
 unsigned long LongTimeDelay = 2000000;
 unsigned long ShortTimeDelay = 1000000;
@@ -189,6 +199,8 @@ TCB warningAlarmTCB;
 TCB solarPanelControlTCB;
 TCB consoleKeypadTCB;
 TCB vehicalComsTCB;
+TCB imageCaptureTCB;
+TCB transportDistanceTCB;
 
 struct PowerSubsystemDataStruct {
     Bool *solarPanelState;
@@ -268,9 +280,17 @@ struct WarningAlarmDataStruct {
 typedef struct WarningAlarmDataStruct WarningAlarmData;
 
 struct ImageCaptureDataStruct {
-    float *imageCaptureFrequency;
+    int *imageCaptureFrequency;
+    signed int *samples;
+    signed int *zeros;
+    unsigned short *sampleIndex;
 };
 typedef struct ImageCaptureDataStruct ImageCaptureData;
+
+struct TransportDistanceStruct {
+    unsigned short *transportDistance;
+};
+typedef struct TransportDistanceStruct TransportDistanceData;
 
 
 //Controls the execution of the power subsystem
@@ -303,6 +323,9 @@ void vehicleCommsTask(void *vehicleCommsData);
 
 //Controls the execution of the ImageCapture task
 void imageCaptureTask(void *imageCaptureData);
+
+//Controls the execution of the TransportDistance task
+void transportDistanceTask(void *transportDistanceData);
 
 //Returns a random integer between low and high inclusively
 int randomInteger(int low, int high);
@@ -416,8 +439,7 @@ int main() {
 
 #endif
 
-//inserts a node at the end of the list
-//code taken from class website: https://class.ece.uw.edu/474/peckol/assignments/lab3/project3Aut18.pdf
+//inserts a node in a list based on the priority
 void insertNode(TCB *node) {
     if (NULL == head) {
         head = node;
@@ -447,7 +469,7 @@ void insertNode(TCB *node) {
                 node->prev = cur->prev;
                 node->prev->next = node;
                 node->next->prev = node;
-                if(cur == tail) {
+                if (cur == tail) {
                     tail = node;
                 }
                 break;
@@ -518,7 +540,7 @@ void setupSystem() {
     powerSubsystemTCB.prev = NULL;
 
     insertNode(&powerSubsystemTCB);
-    TCB *item = head;
+
 
     //Thruster Subsystem
     ThrusterSubsystemData thrusterSubsystemData;
@@ -532,7 +554,7 @@ void setupSystem() {
     thrusterSubsystemTCB.priority = 3;
 
     insertNode(&thrusterSubsystemTCB);
-    item = head;
+
 
     //Satellite Comms
     SatelliteComsData satelliteComsData;
@@ -552,7 +574,7 @@ void setupSystem() {
     satelliteComsTCB.priority = 2;
 
     insertNode(&satelliteComsTCB);
-    item = head;
+
 
     //Console Display
     ConsoleDisplayData consoleDisplayData;
@@ -572,7 +594,7 @@ void setupSystem() {
     consoleDisplayTCB.priority = 1;
 
     insertNode(&consoleDisplayTCB);
-    item = head;
+
 
     //Warning Alarm
     WarningAlarmData warningAlarmData;
@@ -589,7 +611,6 @@ void setupSystem() {
     warningAlarmTCB.priority = 1;
 
     insertNode(&warningAlarmTCB);
-    item = head;
 
 
     ConsoleKeypadData consoleKeypadData;
@@ -606,6 +627,7 @@ void setupSystem() {
     VehicleCommsData vehicleCommsData;
     vehicleCommsData.command = &Command;
     vehicleCommsData.responce = &Response;
+
     vehicalComsTCB.taskDataPtr = (void *) &vehicleCommsData;
     vehicalComsTCB.task = &vehicleCommsTask;
     vehicalComsTCB.next = NULL;
@@ -613,7 +635,33 @@ void setupSystem() {
     vehicalComsTCB.priority = 1;
 
     insertNode(&vehicalComsTCB);
-    item = head;
+
+
+    Samples = malloc(IMAGE_CAPTURE_SAMPLES * sizeof *Samples);
+    Zeros = malloc(IMAGE_CAPTURE_SAMPLES * sizeof *Zeros);
+
+    ImageCaptureData imageCaptureData;
+    imageCaptureData.imageCaptureFrequency = &ImageCaptureFrequency;
+    imageCaptureData.samples = Samples;
+    imageCaptureData.zeros = Zeros;
+    imageCaptureData.sampleIndex = &SamplingIndex;
+
+    imageCaptureTCB.taskDataPtr = (void *) &imageCaptureData;
+    imageCaptureTCB.task = &imageCaptureTask;
+    imageCaptureTCB.next = NULL;
+    imageCaptureTCB.prev = NULL;
+    imageCaptureTCB.priority = 1;
+
+    insertNode(&imageCaptureTCB);
+
+
+    TransportDistanceData transportDistanceData;
+    transportDistanceData.transportDistance = &TransportDistance;
+    transportDistanceTCB.taskDataPtr = (void *) &transportDistanceData;
+    transportDistanceTCB.task = &transportDistanceTask;
+    transportDistanceTCB.next = NULL;
+    transportDistanceTCB.prev = NULL;
+    transportDistanceTCB.priority = 1;
 
 
     //Starts the schedule looping
@@ -1140,13 +1188,13 @@ void solarPanelControlTask(void *solarPanelControlData) {
     static float elapsedTime = 0;
     Bool outputPWM = FALSE;
 
-    if(*data->driveMotorSpeedInc) {
+    if (*data->driveMotorSpeedInc) {
 #if ARDUINO_ON
         dutyCycle = min(0.9f, dutyCycle + 0.05f);
 #endif
         *data->driveMotorSpeedInc = FALSE;
     }
-    if(*data->driveMotorSpeedDec) {
+    if (*data->driveMotorSpeedDec) {
 #if ARDUINO_ON
         dutyCycle = max(0.1f, dutyCycle - 0.05f);
 #endif
@@ -1154,13 +1202,13 @@ void solarPanelControlTask(void *solarPanelControlData) {
     }
     *data->driveMotorSpeed = (unsigned short) (dutyCycle * 10.0f); //Update this so we can display it somewhere
 
-    if(!launchedKeypadTask) {
+    if (!launchedKeypadTask) {
         launchedKeypadTask = TRUE;
         insertNode(&consoleKeypadTCB);
     }
 
-    if(nextPWMRunTime == 0 || systemTime() >= nextPWMRunTime) {
-        if(isPWMOn) {
+    if (nextPWMRunTime == 0 || systemTime() >= nextPWMRunTime) {
+        if (isPWMOn) {
             nextPWMRunTime = systemTime() + PWM_PERIOD * (1.0f - dutyCycle);
             outputPWM = FALSE;
         } else {
@@ -1174,10 +1222,10 @@ void solarPanelControlTask(void *solarPanelControlData) {
 #endif
     }
 
-    if(nextCounterRunTime == 0 || systemTime() >= nextCounterRunTime) {
+    if (nextCounterRunTime == 0 || systemTime() >= nextCounterRunTime) {
         nextCounterRunTime = systemTime() + PWM_COUNTER_PERIOD;
         elapsedTime += PWM_COUNTER_PERIOD * (DEFAULT_DUTY_CYCLE + dutyCycle);
-        if(elapsedTime >= DEPLOY_RETRACT_TIME) {
+        if (elapsedTime >= DEPLOY_RETRACT_TIME) {
             //Interupt
 #if ARDUINO_ON
             digitalWrite(PWM_OUTPUT_PIN, LOW);
@@ -1235,6 +1283,35 @@ void vehicleCommsTask(void *vehicleCommsData) {
 
 //Controls the execution of the ImageCapture task
 void imageCaptureTask(void *imageCaptureData) {
+    ImageCaptureData *data = (ImageCaptureData *) imageCaptureData;
+    static long nextRunTime = 0;
+    if (nextRunTime == 0 || systemTime() >= nextRunTime) {
+        nextRunTime = systemTime() + SAMPLING_DELAY;
+        //Check if we need to record smaples
+        if (*data->sampleIndex < IMAGE_CAPTURE_SAMPLES) {
+#if ARDUINO_ON
+            data->samples[*data->sampleIndex] = analogRead(IMAGE_CAPTURE_PIN);
+#endif
+            data->zeros[*data->sampleIndex] = 0;
+            *data->sampleIndex += 1;
+        } else {
+            signed int maxFrequency = optfft(data->samples, data->zeros);
+#if ARDUINO_ON
+            Serial.print("Running Operation: ");
+            Serial.print("Max: ");
+            Serial.println(samples[maxFrequency]);
+#endif
+            nextRunTime = 0;
+            data->sampleIndex = 0;
+        }
+    }
+}
+
+//Controls the execution of the TransportDistance task
+void transportDistanceTask(void *transportDistanceData) {
+    TransportDistanceData *data = (TransportDistanceData *) transportDistanceData;
+
+    
 
 }
 

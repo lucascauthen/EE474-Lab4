@@ -4,7 +4,7 @@
 // SEE RELEVANT COMMENTS IN Elegoo_TFTLCD.h FOR SETUP.
 //Technical support:goodtft@163.com
 
-#define ARDUINO_ON 0
+#define ARDUINO_ON 1
 #define DEBUG 1
 
 #if ARDUINO_ON
@@ -22,7 +22,7 @@
 #include <limits.h> // Used for random number generation
 #include <time.h>
 #include <stdlib.h>
-#include "testing_sketches/imageCaptureSketch/optfft.h"
+#include "optfft.h"
 
 // The control pins for the LCD can be assigned to any digital or
 // analog pins...but we'll use the analog pins as this allows us to
@@ -123,6 +123,7 @@ unsigned short PowerGeneration = 0;
 #if ARDUINO_ON
 unsigned short BatteryPin = A15; //Analog Pin A15 on ATMEGA 2560
 unsigned short BatteryTempPin = A14;
+unsigned short IMAGE_CAPTURE_PIN = A13;
 #else
 unsigned short BatteryPin = 82; //Analog Pin A15 on ATMEGA 2560
 unsigned short BatteryTempPin = 83;
@@ -521,7 +522,7 @@ void setupSystem() {
 
     solarPanelControlTCB.taskDataPtr = (void *) &solarPanelControlData;
     solarPanelControlTCB.task = &solarPanelControlTask;
-    solarPanelControlTCB.priority = 5;
+    solarPanelControlTCB.priority = 1;
 
 
     //Power Subsystem
@@ -744,6 +745,10 @@ void powerSubsystemTask(void *powerSubsystemData) {
     static Bool batteryInitialRead = TRUE;
     static Bool batteryInitialTempRead = TRUE;
     unsigned long t = systemTime();
+    if (systemTime() >= readBatteryTempExecutionTime) {
+        batteryTempRead(data);
+        readBatteryTempExecutionTime = systemTime() + BatteryTempDelay;
+    }
     if (0 == nextExecutionTime || t > nextExecutionTime) {
 #if !ARDUINO_ON && DEBUG
         printf("powerSubsystemTask\n");
@@ -798,7 +803,14 @@ void powerSubsystemTask(void *powerSubsystemData) {
         } else {
             if (*data->batteryLevel <= BATTERY_10) {
                 if (!*data->solarPanelDeploy) { //If we have not already signalled to deploy
+                    #if ARDUINO_ON
+                    Serial.println("Running deploy!");
+                    #endif
                     insertNode(&solarPanelControlTCB); //Add the task
+                } else {
+                    #if ARDUINO_ON
+                    Serial.println("NOT deploy!");
+                    #endif
                 }
                 *data->solarPanelDeploy = TRUE;
                 *data->solarPanelRetract = FALSE;
@@ -814,11 +826,6 @@ void powerSubsystemTask(void *powerSubsystemData) {
             batteryRead(data);
         }
 
-        //Waits 500us before updating new level to ensure a valid reading
-        if (systemTime() >= readBatteryTempExecutionTime) {
-            batteryTempRead(data);
-        }
-        readBatteryTempExecutionTime = systemTime() + BatteryTempDelay;
         nextExecutionTime = systemTime() + runDelay;
         executionCount++;
         
@@ -843,13 +850,14 @@ void batteryTempRead(PowerSubsystemData *data) {
         newVal = 0;
     }
 
-    int celsius = newVal * 32 + 33;
-    *data->batteryTemp = celsius; //Converts to celsius
+    float celsius = newVal * 32 + 33;
+    *data->batteryTemp = (short) celsius; //Converts to celsius
     //Saves the last recordered temp, enables warning if previous recorded value has a 20% diff
                       //forced delay to visually see the changes in rapid temp warning
     BatteryTempArray[*data->batteryTempIndex] = celsius;
-    if ((0 != (*data->batteryTempIndex)) && (BatteryTempArray[*data->batteryTempIndex-1] > 0) && ((celsius / BatteryTempArray[(*data->batteryTempIndex - 1) % 16] < .8) ||
-                                           (celsius / BatteryTempArray[(*data->batteryTempIndex - 1) % 16] > 1.2))) {
+    if ((0 != *data->batteryTempIndex) && (BatteryTempArray[*data->batteryTempIndex] > 0) && 
+                                        ((celsius / (float) BatteryTempArray[*data->batteryTempIndex-1] < .8) ||
+                                           (celsius / (float) BatteryTempArray[*data->batteryTempIndex-1] > 1.2))) {
         *data->batteryRapidTemp = TRUE;
     } else {
         *data->batteryRapidTemp = FALSE;
@@ -863,6 +871,8 @@ void batteryTempRead(PowerSubsystemData *data) {
         *data->batteryOverTemp = FALSE;
         *data->acknowledgeOverTemp = FALSE;
     }
+
+    *data->batteryTempIndex = (*data->batteryTempIndex + 1) % 16;
 
 #if ARDUINO_ON && DEBUG
     Serial.print("Battery Temp: ");
@@ -1092,7 +1102,7 @@ void warningAlarmTask(void *warningAlarmData) {
             print(printedFuel, 9, fuelColor, 0);
             hideFuelTime = systemTime() + fuelDelay;
         }
-    } else if (fuelStatus != GREEN) {
+    } else {
         print(printedFuel, 9, GREEN, 0);
         fuelStatus = GREEN;
     }
@@ -1282,7 +1292,7 @@ void imageCaptureTask(void *imageCaptureData) {
 #if ARDUINO_ON
             Serial.print("Running Operation: ");
             Serial.print("Max: ");
-            Serial.println(samples[maxFrequency]);
+            Serial.println(data->samples[maxFrequency]);
 #endif
             nextRunTime = 0;
             data->sampleIndex = 0;

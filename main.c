@@ -80,6 +80,7 @@ typedef enum myBool Bool;
 
 
 const int PWM_OUTPUT_PIN = 23;
+const int TRANSPORT_INPUT_PIN = 30;
 
 const char INC_CHAR = '1';
 const char DEC_CHAR = '-';
@@ -95,6 +96,9 @@ const char DRILL_STOP_CHAR = 'H';
 const char NO_VEHICLE_COMMAND = '/';
 char LAST_VEHICLE_COMM = NO_VEHICLE_COMMAND;
 
+const int TRANSPORT_DISTANCE_TIME_SCALING = 1; //scales the relationship between the interval and the assumed distance
+const int TRANSPORT_SAMPLING_DELAY = 10000;
+const int TRANSPORT_UPDATE_THRESHHOLD = 10; // 10% update threshhold
 
 unsigned long runDelay = 5000000; //5 Sec
 #define DEPLOY_RETRACT_TIME SECOND*10
@@ -378,6 +382,7 @@ void setup(void) {
     Serial1.begin(9600);
 
     pinMode(PWM_OUTPUT_PIN, OUTPUT); //SETUP PWM OUTPUT SIGNAL
+	pinMode(TRANSPORT_INPUT_PIN, INPUT);//SETUP TRANSPORT INPUT PIN
 
     Serial.println(F("TFT LCD test")); //Prints to serial monitor
 
@@ -1303,9 +1308,31 @@ void imageCaptureTask(void *imageCaptureData) {
 //Controls the execution of the TransportDistance task
 void transportDistanceTask(void *transportDistanceData) {
     TransportDistanceData *data = (TransportDistanceData *) transportDistanceData;
-
-
-
+#if ARDUINO_ON
+	static long nextRunTime = 0;
+    if (nextRunTime == 0 || systemTime() >= nextRunTime) {
+        nextRunTime = systemTime() + TRANSPORT_SAMPLING_DELAY;
+		
+		int input = digitalRead(TRANSPORT_INPUT_PIN);
+		static int signalValue = HIGH;
+		static int prevTime = 0;
+		if(signalValue && input == LOW) {
+			signalValue = LOW;
+			unsigned long currentTime = systemTime();
+			unsigned long interval = currentTime - (prevTime);
+			prevTime = currentTime;
+			unsigned short distance = (unsigned short)(interval*TRANSPORT_DISTANCE_TIME_SCALING);
+			if (abs(distance-*data->transportDistance) >= *data->transportDistance/TRANSPORT_UPDATE_THRESHHOLD){
+				*data->transportDistance = distance;
+				Serial.print("Transport Distance: ");
+				Serial.println(distance);
+			}
+		} else if (!signalValue && input == HIGH){
+			signalValue = HIGH;
+		}
+		
+	}
+#endif
 }
 
 //Returns a random integer between low and high inclusively

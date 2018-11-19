@@ -109,7 +109,7 @@ const float PWM_PERIOD = SECOND / 2.0f;
 const unsigned long WARNING_ALARM_PERIOD = (const unsigned long) (SECOND / 4.0f);
 const float SAMPLING_FREQUENCY = 7500.0f;
 #define IMAGE_CAPTURE_SAMPLES  256
-const unsigned long SAMPLING_DELAY = 133; //7500
+const unsigned long SAMPLING_DELAY = 122; //8192
 
 long randomGenerationSeed = 98976;
 Bool shouldPrintTaskTiming = TRUE;
@@ -1327,7 +1327,7 @@ void imageCaptureTask(void *imageCaptureData) {
         //Check if we need to record smaples
         if (*data->sampleIndex < IMAGE_CAPTURE_SAMPLES) {
 #if ARDUINO_ON
-            signed int d = (analogRead(IMAGE_CAPTURE_PIN) * (5.0 / 1024.0) - 1.5) * 20;
+            signed int d = (((int) analogRead(IMAGE_CAPTURE_PIN) - 512) / 16);
             data->samples[*data->sampleIndex] = d;
             //Serial.println(d);
 #endif
@@ -1337,7 +1337,7 @@ void imageCaptureTask(void *imageCaptureData) {
             if (nextPrintTime == 0 || systemTime() >= nextPrintTime) {
                 nextPrintTime = (unsigned long) (systemTime() + SECOND);
 
-                signed int maxFrequency = 7500 * optfft(data->samples, data->zeros) / IMAGE_CAPTURE_SAMPLES;
+                signed int maxFrequency = 8192 * optfft(data->samples, data->zeros) / IMAGE_CAPTURE_SAMPLES / 2;
 #if ARDUINO_ON
                 Serial.print("Max: ");
                 //long max = data->samples[maxFrequency];

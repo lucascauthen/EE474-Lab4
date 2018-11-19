@@ -91,14 +91,27 @@ const char NO_SOLAR_PANEL_INPUT = '0';
 char LAST_SOLAR_PANEL_CONTROL_CHAR = NO_SOLAR_PANEL_INPUT;
 
 const char ACKNOWLEDGEOVERTEMP_CHAR = 'A';
+
+
+//To mining vehicle
 const char FORWARD_CHAR = 'F';
 const char BACK_CHAR = 'B';
 const char LEFT_CHAR = 'L';
 const char RIGHT_CHAR = 'R';
 const char DRILL_START_CHAR = 'D';
 const char DRILL_STOP_CHAR = 'H';
+
+const char OK_LIFT_OFF = 'K';
+const char CONFIRM_DOCK = 'C';
+
 const char NO_VEHICLE_COMMAND = '/';
 char LAST_VEHICLE_COMM = NO_VEHICLE_COMMAND;
+
+//From mining vehicle
+const char REQUEST_TRANSPORT = 'T';
+const char REQUEST_DOCK = 'D';
+const char RESPONSE_END = '>';
+
 
 const float SECOND = 1000000.0f;
 const float PWM_COUNTER_PERIOD = SECOND / 4.0f;
@@ -302,6 +315,7 @@ struct ImageCaptureDataStruct {
     signed int *samples;
     signed int *zeros;
     unsigned short *sampleIndex;
+    signed int* buffer;
 };
 typedef struct ImageCaptureDataStruct ImageCaptureData;
 
@@ -359,6 +373,9 @@ void setupSystem();
 
 //Process earth input
 void processesEarthInput(char in);
+
+//Process mining input
+void processesMiningInput(char in);
 
 //Prints timing information for a function based on its last runtime
 void printTaskTiming(char taskName[], unsigned long lastRunTime);
@@ -653,7 +670,7 @@ void setupSystem() {
     warningAlarmTCB.prev = NULL;
     warningAlarmTCB.priority = 1;
 
-    //insertNode(&warningAlarmTCB);
+    insertNode(&warningAlarmTCB);
 
 
     ConsoleKeypadData consoleKeypadData;
@@ -688,6 +705,7 @@ void setupSystem() {
     imageCaptureData.samples = Samples;
     imageCaptureData.zeros = Zeros;
     imageCaptureData.sampleIndex = &SamplingIndex;
+    imageCaptureData.buffer = malloc(16 * sizeof *imageCaptureData.buffer);
 
     imageCaptureTCB.taskDataPtr = (void *) &imageCaptureData;
     imageCaptureTCB.task = &imageCaptureTask;
@@ -728,16 +746,10 @@ void scheduleTask() {
                 char input = Serial.read();
                 processesEarthInput(input);
             }
-            /*
-            bool didPrint = false;
             while (Serial1.available() > 0) {
-                didPrint = true;
-                //Serial.print(Serial1.read());
+                processesMiningInput(Serial1.read());
             }
-            if (didPrint) {
-                //Serial.println();
-            }
-             */
+
 #endif
         }
     }
@@ -764,6 +776,24 @@ void processesEarthInput(char in) {
         LAST_VEHICLE_COMM = in;
     } else if (ACKNOWLEDGEOVERTEMP_CHAR == in) {
         AcknowledgeOverTemp = TRUE;
+    }
+}
+
+void processesMiningInput(char in) {
+    if (RESPONSE_END == in) {
+        Serial.println(in);
+    } else if (REQUEST_TRANSPORT == in) {
+        Serial1.print(OK_LIFT_OFF);
+        if(!contains(&transportDistanceTCB)) {
+            insertNode(&transportDistanceTCB);
+        }
+    } else if (REQUEST_DOCK == in) {
+        Serial1.print(CONFIRM_DOCK);
+        if(contains(&transportDistanceTCB)) {
+            removeNode(&transportDistanceTCB);
+        }
+    } else {
+        Serial.print(in);
     }
 }
 
@@ -1069,6 +1099,9 @@ void consoleDisplayTask(void *consoleDisplayData) {
             Serial.print("\tPower Generation: ");
             Serial.println(*data->powerGeneration);
             Serial.println();
+            Serial.print("\tPower Generation: ");
+            Serial.println(*data->powerGeneration);
+            Serial.println();
 #elif 0
             printf("\tSolar Panel State: ");
             printf((*data->solarPanelState ? " ON" : "OFF"));
@@ -1143,7 +1176,7 @@ void warningAlarmTask(void *warningAlarmData) {
                 print("FUEL: " + (String) * data->fuelLevel + " ", fuelColor, 0);
                 hideFuelTime = systemTime() + fuelDelay;
             }
-        } else {
+        } else if(fuelStatus != GREEN){
             print("FUEL: " + (String) * data->fuelLevel + " ", GREEN, 0);
             fuelStatus = GREEN;
         }
@@ -1178,7 +1211,11 @@ void warningAlarmTask(void *warningAlarmData) {
         }
 
         //DISPLAYS BATTERY TEMP
-        print("BATTERY TEMP: " + (String) * data->batteryTemp + " ", GREEN, 2);
+        static unsigned long tempExecutionTime = 0;
+        if(tempExecutionTime == 0 || systemTime() >= tempExecutionTime) {
+            tempExecutionTime = systemTime() + SECOND;
+            print("BATTERY TEMP: " + (String) * data->batteryTemp + " ", GREEN, 2);
+        }
 
         if (*data->batteryRapidTemp) {
             print("Battery Rapid Temp", RED, 3);
@@ -1323,31 +1360,21 @@ void imageCaptureTask(void *imageCaptureData) {
     static unsigned long nextRunTime = 0;
     static unsigned long nextPrintTime = 0;
     if (nextRunTime == 0 || systemTime() >= nextRunTime) {
-        nextRunTime = (unsigned long) (systemTime() + SAMPLING_DELAY);
-        //Check if we need to record smaples
-        if (*data->sampleIndex < IMAGE_CAPTURE_SAMPLES) {
-#if ARDUINO_ON
+        nextRunTime = (unsigned long) (systemTime() + SECOND);
+        for(int i = 0; i < IMAGE_CAPTURE_SAMPLES; i++) {
+            unsigned long lastRead = systemTime();
             signed int d = (((int) analogRead(IMAGE_CAPTURE_PIN) - 512) / 16);
-            data->samples[*data->sampleIndex] = d;
-            //Serial.println(d);
-#endif
-            data->zeros[*data->sampleIndex] = 0;
-            *data->sampleIndex += 1;
-        } else {
-            if (nextPrintTime == 0 || systemTime() >= nextPrintTime) {
-                nextPrintTime = (unsigned long) (systemTime() + SECOND);
-
-                signed int maxFrequency = 8192 * optfft(data->samples, data->zeros) / IMAGE_CAPTURE_SAMPLES / 2;
-#if ARDUINO_ON
-                Serial.print("Max: ");
-                //long max = data->samples[maxFrequency];
-                Serial.println(maxFrequency);
-
-#endif
-            }
-            nextRunTime = 0;
-            *data->sampleIndex = 0;
+            data->samples[i] = d;
+            data->zeros[i] = 0;
+            while(systemTime()-lastRead < SAMPLING_DELAY) {}
         }
+        signed int maxFrequency = 8192 * optfft(data->samples, data->zeros) / IMAGE_CAPTURE_SAMPLES;
+
+        Serial.print("Recorded Frequency: ");
+        Serial.println(maxFrequency);
+        *data->imageCaptureFrequency = maxFrequency;
+        data->buffer[*data->sampleIndex % 16] = maxFrequency;
+        *data->sampleIndex += 1;
     }
 }
 

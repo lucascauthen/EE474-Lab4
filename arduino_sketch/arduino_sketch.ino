@@ -22,7 +22,9 @@
 #include <limits.h> // Used for random number generation
 #include <time.h>
 #include <stdlib.h>
-#include "optfft.h"
+//#include "optfft.h"
+#include "arduinoFFT.h"
+arduinoFFT FFT = arduinoFFT();
 
 // The control pins for the LCD can be assigned to any digital or
 // analog pins...but we'll use the analog pins as this allows us to
@@ -104,7 +106,7 @@ const float DEFAULT_DUTY_CYCLE = 0.5f;
 const float PWM_PERIOD = SECOND / 2.0f;
 const unsigned long WARNING_ALARM_PERIOD = (const unsigned long) (SECOND / 4.0f);
 const float SAMPLING_FREQUENCY  = 7500.0f;
-const unsigned short IMAGE_CAPTURE_SAMPLES = 256;
+#define IMAGE_CAPTURE_SAMPLES  256
 const unsigned long SAMPLING_DELAY  = 133; //7500
 
 long randomGenerationSeed = 98976;
@@ -167,8 +169,8 @@ Bool BatteryLow = FALSE;
 
 //ImageCapture Task
 int ImageCaptureFrequency = 0;
-signed int *Samples;
-signed int *Zeros;
+double *Samples;
+double *Zeros;
 unsigned short SamplingIndex;
 
 //Transport Distance
@@ -295,8 +297,8 @@ typedef struct WarningAlarmDataStruct WarningAlarmData;
 
 struct ImageCaptureDataStruct {
     int *imageCaptureFrequency;
-    signed int *samples;
-    signed int *zeros;
+    double *samples;
+    double *zeros;
     unsigned short *sampleIndex;
 };
 typedef struct ImageCaptureDataStruct ImageCaptureData;
@@ -723,14 +725,16 @@ void scheduleTask() {
                 char input = Serial.read();
                 processesEarthInput(input);
             }
+            /*
             bool didPrint = false;
             while (Serial1.available() > 0) {
                 didPrint = true;
-                Serial.print(Serial1.read());
+                //Serial.print(Serial1.read());
             }
             if (didPrint) {
-                Serial.println();
+                //Serial.println();
             }
+             */
 #endif
         }
     }
@@ -1254,10 +1258,7 @@ void solarPanelControlTask(void *solarPanelControlData) {
         }
         isPWMOn = !isPWMOn;
 #if ARDUINO_ON
-        //Serial.print("Next run time:");
-        //Serial.println((float)(nextPWMRunTime - systemTime()) / SECOND);
         digitalWrite(PWM_OUTPUT_PIN, isPWMOn);
-        //Serial.println(outputPWM ? "High" : "Low");
 #endif
     }
 
@@ -1329,18 +1330,24 @@ void imageCaptureTask(void *imageCaptureData) {
         //Check if we need to record smaples
         if (*data->sampleIndex < IMAGE_CAPTURE_SAMPLES) {
 #if ARDUINO_ON
-            data->samples[*data->sampleIndex] = analogRead(IMAGE_CAPTURE_PIN) * (5.0 / 1023.0);
+            double d = analogRead(IMAGE_CAPTURE_PIN) * (5.0 / 1023.0) - 1.5;
+            data->samples[*data->sampleIndex] = d;
+            //Serial.println(d);
 #endif
             data->zeros[*data->sampleIndex] = 0;
             *data->sampleIndex += 1;
         } else {
             if (nextPrintTime == 0 || systemTime() >= nextPrintTime) {
                 nextPrintTime = (unsigned long) (systemTime() + SECOND);
-                signed int maxFrequency = optfft(data->samples, data->zeros);
+                FFT.Windowing(data->samples, IMAGE_CAPTURE_SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+                FFT.Compute(data->samples, data->zeros, IMAGE_CAPTURE_SAMPLES, FFT_FORWARD);
+                FFT.ComplexToMagnitude(data->samples, data->zeros, IMAGE_CAPTURE_SAMPLES);
+                double peak = FFT.MajorPeak(data->samples, IMAGE_CAPTURE_SAMPLES, SAMPLING_FREQUENCY)/2;
+                //signed int maxFrequency = 7500 * optfft(data->samples, data->zeros) / 256;
 #if ARDUINO_ON
                 Serial.print("Max: ");
-                long max = data->samples[maxFrequency];
-                Serial.println(max);
+                //long max = data->samples[maxFrequency];
+                Serial.println(peak);
 
 #endif
             }

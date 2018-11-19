@@ -103,9 +103,9 @@ unsigned long runDelay = 5000000; //5 Sec
 const float DEFAULT_DUTY_CYCLE = 0.5f;
 const float PWM_PERIOD = SECOND / 2.0f;
 const unsigned long WARNING_ALARM_PERIOD = (const unsigned long) (SECOND / 4.0f);
-#define SAMPLING_FREQUENCY  7500.0f
-#define IMAGE_CAPTURE_SAMPLES 256
-#define SAMPLING_DELAY  (1.0f/SAMPLING_FREQUENCY)*SECOND
+const float SAMPLING_FREQUENCY  = 7500.0f;
+const unsigned short IMAGE_CAPTURE_SAMPLES = 256;
+const unsigned long SAMPLING_DELAY  = 133; //7500
 
 long randomGenerationSeed = 98976;
 Bool shouldPrintTaskTiming = TRUE;
@@ -382,8 +382,8 @@ unsigned short unsignedShortMin(long a, long b) {
 
 //Arduino setup function
 void setup(void) {
-    Serial.begin(9600); //Sets baud rate to 9600
-    Serial1.begin(9600);
+    Serial.begin(115200); //Sets baud rate to 9600
+    Serial1.begin(115200);
 
     pinMode(PWM_OUTPUT_PIN, OUTPUT); //SETUP PWM OUTPUT SIGNAL
 
@@ -648,7 +648,7 @@ void setupSystem() {
     warningAlarmTCB.prev = NULL;
     warningAlarmTCB.priority = 1;
 
-    insertNode(&warningAlarmTCB);
+    //insertNode(&warningAlarmTCB);
 
 
     ConsoleKeypadData consoleKeypadData;
@@ -755,7 +755,7 @@ void processesEarthInput(char in) {
         LAST_VEHICLE_COMM = in;
     } else if (DRILL_STOP_CHAR == in) {
         LAST_VEHICLE_COMM = in;
-    } else if (ACKNOWLEDGEOVERTEMP_CHAR == in ) {
+    } else if (ACKNOWLEDGEOVERTEMP_CHAR == in) {
         AcknowledgeOverTemp = TRUE;
     }
 }
@@ -781,7 +781,6 @@ void powerSubsystemTask(void *powerSubsystemData) {
         readBatteryTempExecutionTime = systemTime() + BatteryTempDelay;
     }
     if (0 == nextExecutionTime || t > nextExecutionTime) {
-        unsigned long startTime = systemTime();
 #if !ARDUINO_ON && DEBUG
         printf("powerSubsystemTask\n");
 #endif
@@ -860,11 +859,6 @@ void powerSubsystemTask(void *powerSubsystemData) {
 
         nextExecutionTime = systemTime() + runDelay;
         executionCount++;
-
-#if ARDUINO_ON
-        Serial.print("powerSubsystemTask: ")
-        Serial.println((systemTime()-startTime)/SECOND)
-#endif
     }
     // if (batteryInitialTempRead && systemTime() >= readBatteryTempExecutionTime) {
     //     batteryTempRead(data);
@@ -892,14 +886,15 @@ void batteryTempRead(PowerSubsystemData *data) {
     //forced delay to visually see the changes in rapid temp warning
     BatteryTempArray[*data->batteryTempIndex] = celsius;
     if ((0 != *data->batteryTempIndex) && (BatteryTempArray[*data->batteryTempIndex] > 0) &&
-                                        ((celsius / (float) BatteryTempArray[*data->batteryTempIndex-1] < .8) ||
-                                           (celsius / (float) BatteryTempArray[*data->batteryTempIndex-1] > 1.2))) {
+        ((celsius / (float) BatteryTempArray[*data->batteryTempIndex - 1] < .8) ||
+         (celsius / (float) BatteryTempArray[*data->batteryTempIndex - 1] > 1.2))) {
         *data->batteryRapidTemp = TRUE;
     } else {
         *data->batteryRapidTemp = FALSE;
     }
 
-    if ((BatteryTempArray[*data->batteryTempIndex] > 180) && (BatteryTempArray[*data->batteryTempIndex] != BatteryTempArray[*data->batteryTempIndex-1])) {
+    if ((BatteryTempArray[*data->batteryTempIndex] > 180) &&
+        (BatteryTempArray[*data->batteryTempIndex] != BatteryTempArray[*data->batteryTempIndex - 1])) {
         *data->batteryOverTemp = TRUE;
         *data->acknowledgeOverTemp = FALSE;
         *data->alarmCount = 0;
@@ -1189,7 +1184,7 @@ void warningAlarmTask(void *warningAlarmData) {
         } else {
             print("Battery Rapid Temp", 18, NONE, 3);
         }
-
+    }
     static unsigned long nextExecutionTime = 0;
     static Bool FLASH = TRUE;
     if (nextExecutionTime == 0) {
@@ -1259,8 +1254,8 @@ void solarPanelControlTask(void *solarPanelControlData) {
         }
         isPWMOn = !isPWMOn;
 #if ARDUINO_ON
-        Serial.print("Next run time:");
-        Serial.println((float)(nextPWMRunTime - systemTime()) / SECOND);
+        //Serial.print("Next run time:");
+        //Serial.println((float)(nextPWMRunTime - systemTime()) / SECOND);
         digitalWrite(PWM_OUTPUT_PIN, isPWMOn);
         //Serial.println(outputPWM ? "High" : "Low");
 #endif
@@ -1327,25 +1322,30 @@ void vehicleCommsTask(void *vehicleCommsData) {
 //Controls the execution of the ImageCapture task
 void imageCaptureTask(void *imageCaptureData) {
     ImageCaptureData *data = (ImageCaptureData *) imageCaptureData;
-    static long nextRunTime = 0;
+    static unsigned long nextRunTime = 0;
+    static unsigned long nextPrintTime = 0;
     if (nextRunTime == 0 || systemTime() >= nextRunTime) {
-        nextRunTime = systemTime() + SAMPLING_DELAY;
+        nextRunTime = (unsigned long) (systemTime() + SAMPLING_DELAY);
         //Check if we need to record smaples
         if (*data->sampleIndex < IMAGE_CAPTURE_SAMPLES) {
 #if ARDUINO_ON
-            data->samples[*data->sampleIndex] = analogRead(IMAGE_CAPTURE_PIN);
+            data->samples[*data->sampleIndex] = analogRead(IMAGE_CAPTURE_PIN) * (5.0 / 1023.0);
 #endif
             data->zeros[*data->sampleIndex] = 0;
             *data->sampleIndex += 1;
         } else {
-            signed int maxFrequency = optfft(data->samples, data->zeros);
+            if (nextPrintTime == 0 || systemTime() >= nextPrintTime) {
+                nextPrintTime = (unsigned long) (systemTime() + SECOND);
+                signed int maxFrequency = optfft(data->samples, data->zeros);
 #if ARDUINO_ON
-            Serial.print("Running Operation: ");
-            Serial.print("Max: ");
-            Serial.println(data->samples[maxFrequency]);
+                Serial.print("Max: ");
+                long max = data->samples[maxFrequency];
+                Serial.println(max);
+
 #endif
+            }
             nextRunTime = 0;
-            data->sampleIndex = 0;
+            *data->sampleIndex = 0;
         }
     }
 }

@@ -127,6 +127,8 @@ const unsigned long SAMPLING_DELAY = 122; //8192
 long randomGenerationSeed = 98976;
 Bool shouldPrintTaskTiming = TRUE;
 
+const float TRANSPORT_UPDATE_THRESHHOLD = 1.5f;
+
 
 //Thrust Control
 unsigned int ThrusterControl = 0;
@@ -142,6 +144,7 @@ unsigned short PowerGeneration = 0;
 unsigned short BatteryPin = A15; //Analog Pin A15 on ATMEGA 2560
 unsigned short BatteryTempPin = A14;
 unsigned short IMAGE_CAPTURE_PIN = A13;
+unsigned short TRANSPORT_INPUT_PIN = A12;
 #else
 unsigned short BatteryPin = 82; //Analog Pin A15 on ATMEGA 2560
 unsigned short BatteryTempPin = 83;
@@ -315,7 +318,7 @@ struct ImageCaptureDataStruct {
     signed int *samples;
     signed int *zeros;
     unsigned short *sampleIndex;
-    signed int* buffer;
+    signed int *buffer;
 };
 typedef struct ImageCaptureDataStruct ImageCaptureData;
 
@@ -776,6 +779,10 @@ void processesEarthInput(char in) {
         LAST_VEHICLE_COMM = in;
     } else if (ACKNOWLEDGEOVERTEMP_CHAR == in) {
         AcknowledgeOverTemp = TRUE;
+    } else if (REQUEST_TRANSPORT == in) {
+        Serial1.print(REQUEST_TRANSPORT);
+    } else if (REQUEST_DOCK == in) {
+        Serial1.print(REQUEST_DOCK);
     }
 }
 
@@ -783,13 +790,15 @@ void processesMiningInput(char in) {
     if (RESPONSE_END == in) {
         Serial.println(in);
     } else if (REQUEST_TRANSPORT == in) {
-        Serial1.print(OK_LIFT_OFF);
-        if(!contains(&transportDistanceTCB)) {
+        if (!contains(&transportDistanceTCB)) {
+            Serial.println("Starting lift off!");
+            Serial1.print(OK_LIFT_OFF);
             insertNode(&transportDistanceTCB);
         }
     } else if (REQUEST_DOCK == in) {
         Serial1.print(CONFIRM_DOCK);
-        if(contains(&transportDistanceTCB)) {
+        if (contains(&transportDistanceTCB)) {
+            Serial.println("Transport Complete!");
             removeNode(&transportDistanceTCB);
         }
     } else {
@@ -1176,7 +1185,7 @@ void warningAlarmTask(void *warningAlarmData) {
                 print("FUEL: " + (String) * data->fuelLevel + " ", fuelColor, 0);
                 hideFuelTime = systemTime() + fuelDelay;
             }
-        } else if(fuelStatus != GREEN){
+        } else if (fuelStatus != GREEN) {
             print("FUEL: " + (String) * data->fuelLevel + " ", GREEN, 0);
             fuelStatus = GREEN;
         }
@@ -1212,7 +1221,7 @@ void warningAlarmTask(void *warningAlarmData) {
 
         //DISPLAYS BATTERY TEMP
         static unsigned long tempExecutionTime = 0;
-        if(tempExecutionTime == 0 || systemTime() >= tempExecutionTime) {
+        if (tempExecutionTime == 0 || systemTime() >= tempExecutionTime) {
             tempExecutionTime = systemTime() + SECOND;
             print("BATTERY TEMP: " + (String) * data->batteryTemp + " ", GREEN, 2);
         }
@@ -1361,17 +1370,19 @@ void imageCaptureTask(void *imageCaptureData) {
     static unsigned long nextPrintTime = 0;
     if (nextRunTime == 0 || systemTime() >= nextRunTime) {
         nextRunTime = (unsigned long) (systemTime() + SECOND);
-        for(int i = 0; i < IMAGE_CAPTURE_SAMPLES; i++) {
+        for (int i = 0; i < IMAGE_CAPTURE_SAMPLES; i++) {
             unsigned long lastRead = systemTime();
             signed int d = (((int) analogRead(IMAGE_CAPTURE_PIN) - 512) / 16);
             data->samples[i] = d;
             data->zeros[i] = 0;
-            while(systemTime()-lastRead < SAMPLING_DELAY) {}
+            while (systemTime() - lastRead < SAMPLING_DELAY) {}
         }
         signed int maxFrequency = 8192 * optfft(data->samples, data->zeros) / IMAGE_CAPTURE_SAMPLES;
 
-        Serial.print("Recorded Frequency: ");
-        Serial.println(maxFrequency);
+        if (!contains(&transportDistanceTCB)) {
+            Serial.print("Image Frequency: ");
+            Serial.println(maxFrequency);
+        }
         *data->imageCaptureFrequency = maxFrequency;
         data->buffer[*data->sampleIndex % 16] = maxFrequency;
         *data->sampleIndex += 1;
@@ -1381,7 +1392,24 @@ void imageCaptureTask(void *imageCaptureData) {
 //Controls the execution of the TransportDistance task
 void transportDistanceTask(void *transportDistanceData) {
     TransportDistanceData *data = (TransportDistanceData *) transportDistanceData;
+#if ARDUINO_ON
+    static unsigned long nextRunTime = 0;
+    if (nextRunTime == 0 || systemTime() >= nextRunTime) {
+        nextRunTime = systemTime() + SECOND;
+        float distance = (float)ImageCaptureFrequency/ 1.75f;
 
+        *data->transportDistance = (unsigned short) distance;
+        Serial.print("Transport Distance: ");
+        if(distance < 100) {
+            Serial.print("<100");
+        } else if(distance > 2000) {
+            Serial.print(">3500");
+        } else {
+            Serial.print(distance);
+        }
+        Serial.println("m");
+    }
+#endif
 
 }
 

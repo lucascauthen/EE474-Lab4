@@ -11,6 +11,7 @@
 
 #include <Elegoo_GFX.h>    // Core graphics library
 #include <Elegoo_TFTLCD.h> // Hardware-specific library
+
 #else
 
 #include <time.h>
@@ -22,9 +23,10 @@
 #include <limits.h> // Used for random number generation
 #include <time.h>
 #include <stdlib.h>
-//#include "optfft.h"
-#include "arduinoFFT.h"
-arduinoFFT FFT = arduinoFFT();
+#include "optfft.h"
+//#include "arduinoFFT.h"
+
+//arduinoFFT FFT = arduinoFFT();
 
 // The control pins for the LCD can be assigned to any digital or
 // analog pins...but we'll use the analog pins as this allows us to
@@ -105,9 +107,9 @@ unsigned long runDelay = 5000000; //5 Sec
 const float DEFAULT_DUTY_CYCLE = 0.5f;
 const float PWM_PERIOD = SECOND / 2.0f;
 const unsigned long WARNING_ALARM_PERIOD = (const unsigned long) (SECOND / 4.0f);
-const float SAMPLING_FREQUENCY  = 7500.0f;
+const float SAMPLING_FREQUENCY = 7500.0f;
 #define IMAGE_CAPTURE_SAMPLES  256
-const unsigned long SAMPLING_DELAY  = 133; //7500
+const unsigned long SAMPLING_DELAY = 133; //7500
 
 long randomGenerationSeed = 98976;
 Bool shouldPrintTaskTiming = TRUE;
@@ -169,8 +171,8 @@ Bool BatteryLow = FALSE;
 
 //ImageCapture Task
 int ImageCaptureFrequency = 0;
-double *Samples;
-double *Zeros;
+signed int *Samples;
+signed int *Zeros;
 unsigned short SamplingIndex;
 
 //Transport Distance
@@ -297,8 +299,8 @@ typedef struct WarningAlarmDataStruct WarningAlarmData;
 
 struct ImageCaptureDataStruct {
     int *imageCaptureFrequency;
-    double *samples;
-    double *zeros;
+    signed int *samples;
+    signed int *zeros;
     unsigned short *sampleIndex;
 };
 typedef struct ImageCaptureDataStruct ImageCaptureData;
@@ -350,7 +352,7 @@ int randomInteger(int low, int high);
 void scheduleTask();
 
 //Prints a string to the tft given text, the length of the text, a color, and a line number
-void print(char str[], int length, int color, int line);
+void print(String str, int color, int line);
 
 //Starts up the system by creating all the objects that are needed to run the system
 void setupSystem();
@@ -447,6 +449,7 @@ void setup(void) {
 void loop(void) {
     setupSystem();
 }
+
 #else
 
 int main() {
@@ -876,7 +879,8 @@ void powerSubsystemTask(void *powerSubsystemData) {
 
 void batteryTempRead(PowerSubsystemData *data) {
 #if ARDUINO_ON
-    unsigned short newVal = (((analogRead(BatteryTempPin) - 50)*0.1286) / 3.25); // (*(data->powerConsumption)) + (*(data->powerGeneration))
+    unsigned short newVal = (((analogRead(BatteryTempPin) - 50) * 0.1286) /
+                             3.25); // (*(data->powerConsumption)) + (*(data->powerGeneration))
 #else
     unsigned short newVal = 0;
 #endif
@@ -897,12 +901,18 @@ void batteryTempRead(PowerSubsystemData *data) {
         *data->batteryRapidTemp = FALSE;
     }
 
-    if ((BatteryTempArray[*data->batteryTempIndex] > 180) &&
+    if ((0 != *data->batteryTempIndex) && (BatteryTempArray[*data->batteryTempIndex] > 0) &&
+        (BatteryTempArray[*data->batteryTempIndex] > 180) &&
         (BatteryTempArray[*data->batteryTempIndex] != BatteryTempArray[*data->batteryTempIndex - 1])) {
         *data->batteryOverTemp = TRUE;
         *data->acknowledgeOverTemp = FALSE;
         *data->alarmCount = 0;
     } else if (*data->acknowledgeOverTemp) {
+        *data->batteryOverTemp = FALSE;
+        *data->acknowledgeOverTemp = FALSE;
+        *data->alarmCount = 0;
+    } else if ((0 != *data->batteryTempIndex) && (BatteryTempArray[*data->batteryTempIndex] > 0) &&
+               (BatteryTempArray[*data->batteryTempIndex] < 180)) {
         *data->batteryOverTemp = FALSE;
         *data->acknowledgeOverTemp = FALSE;
         *data->alarmCount = 0;
@@ -913,7 +923,8 @@ void batteryTempRead(PowerSubsystemData *data) {
 
 void batteryRead(PowerSubsystemData *data) {
 #if ARDUINO_ON
-    unsigned short newVal = ((analogRead(BatteryPin) - 50)*0.1286); //- (*(data->powerConsumption)) + (*(data->powerGeneration))
+    unsigned short newVal = ((analogRead(BatteryPin) - 50) *
+                             0.1286); //- (*(data->powerConsumption)) + (*(data->powerGeneration))
 #else
     unsigned short newVal = 0;
 #endif
@@ -1110,12 +1121,7 @@ void warningAlarmTask(void *warningAlarmData) {
 
         unsigned long fuelDelay = (*data->fuelLevel <= FUEL_10) ? LongTimeDelay : ShortTimeDelay;
         int fuelColor = (*data->fuelLevel <= FUEL_10) ? RED : ORANGE;
-        char fuelLevelString[3];
-        unsigned short fuelLevel = 0;
-        fuelLevel = *data->fuelLevel;
-        sprintf(fuelLevelString, "%d", fuelLevel);
-        char printedFuel[9] = "FUEL :";
-        strcat(printedFuel, fuelLevelString);
+
 
         if (*data->fuelLevel <= FUEL_50) {
             if (fuelStatus == fuelColor) {
@@ -1123,70 +1129,61 @@ void warningAlarmTask(void *warningAlarmData) {
                     if (hideFuelTime < systemTime()) {
                         showFuelTime = systemTime() + fuelDelay;
                         hideFuelTime = 0;
-                        print(printedFuel, 9, NONE, 0);
+                        print("FUEL: " + (String) * data->fuelLevel + " ", NONE, 0);
                     }
                 } else { //If hiding fuel status
                     if (showFuelTime < systemTime()) {
                         hideFuelTime = systemTime() + fuelDelay;
                         showFuelTime = 0;
-                        print(printedFuel, 9, fuelColor, 0);
+                        print("FUEL: " + (String) * data->fuelLevel + " ", fuelColor, 0);
                     }
                 }
             } else {
                 fuelStatus = fuelColor;
-                print(printedFuel, 9, fuelColor, 0);
+                print("FUEL: " + (String) * data->fuelLevel + " ", fuelColor, 0);
                 hideFuelTime = systemTime() + fuelDelay;
             }
         } else {
-            print(printedFuel, 9, GREEN, 0);
+            print("FUEL: " + (String) * data->fuelLevel + " ", GREEN, 0);
             fuelStatus = GREEN;
         }
 
         //DISPLAY BATTERY LEVEL 0-36V Changing Color depending on level
         unsigned long batteryDelay = (*data->batteryLevel <= BATTERY_10) ? ShortTimeDelay : LongTimeDelay;
         int batteryColor = (*data->batteryLevel <= BATTERY_10) ? RED : ORANGE;
-        char batLevelString[3];
-        unsigned short batLevel = *data->batteryLevel;
-        sprintf(batLevelString, "%d", batLevel);
-        char printedBat[12] = "BATTERY: ";
-        strcat(printedBat, batLevelString);
+
         if (*data->batteryLevel <= BATTERY_50) {
             if (batteryStatus == batteryColor) {
                 if (showBatteryTime == 0) { //If showing battery status
                     if (hideBatteryTime < systemTime()) {
                         showBatteryTime = systemTime() + batteryDelay;
                         hideBatteryTime = 0;
-                        print(printedBat, 12, NONE, 1);
+                        print("BATTERY: " + (String) * data->batteryLevel + " ", NONE, 1);
                     }
                 } else { //If hiding battery status
                     if (showBatteryTime < systemTime()) {
                         hideBatteryTime = systemTime() + batteryDelay;
                         showBatteryTime = 0;
-                        print(printedBat, 12, batteryColor, 1);
+                        print("BATTERY: " + (String) * data->batteryLevel + " ", batteryColor, 1);
                     }
                 }
             } else {
                 batteryStatus = batteryColor;
-                print(printedBat, 12, batteryColor, 1);
+                print("BATTERY: " + (String) * data->batteryLevel + " ", batteryColor, 1);
                 hideBatteryTime = systemTime() + batteryDelay;
             }
         } else if (batteryStatus != GREEN) {
-            print(printedBat, 12, GREEN, 1);
+            print("BATTERY: " + (String) * data->batteryLevel + " ", GREEN, 1);
             batteryStatus = GREEN;
         }
 
         //DISPLAYS BATTERY TEMP
-        char batTempString[3];
-        unsigned short batTemp = *data->batteryTemp;
-        sprintf(batTempString, "%d", batTemp);
-        char printedBatTemp[18] = "BATTERY TEMP: ";
-        strcat(printedBatTemp, batTempString);
-        print(printedBatTemp, 18, GREEN, 2);
+        print("BATTERY TEMP: " + (String) * data->batteryTemp + " ", GREEN, 2);
 
         if (*data->batteryRapidTemp) {
-            print("Battery Rapid Temp", 18, RED, 3);
+            print("Battery Rapid Temp", RED, 3);
         } else {
-            print("Battery Rapid Temp", 18, NONE, 3);
+            print("Battery Rapid Temp", NONE, 3);
         }
     }
     static unsigned long nextExecutionTime = 0;
@@ -1198,26 +1195,26 @@ void warningAlarmTask(void *warningAlarmData) {
         if (*data->batteryOverTemp && !(*data->acknowledgeOverTemp)) {
             if (*data->alarmCount < 15) {
                 *data->alarmCount++;
-                print("TEMPERATURE", 11, NONE, 4);
+                print("TEMPERATURE", NONE, 4);
                 nextExecutionTime = systemTime() + 1000000;
             } else { //Cycle Pattern for Past 15 seconds
                 *data->alarmCount++;
                 if (*data->alarmCount % 10 > 5) {
                     if (FLASH) {
-                        print("TEMPERATURE", 11, RED, 4);
+                        print("TEMPERATURE", RED, 4);
                         FLASH = FALSE;
                     } else {
                         FLASH = TRUE;
-                        print("TEMPERATURE", 11, NONE, 4);
+                        print("TEMPERATURE", NONE, 4);
                     }
                     nextExecutionTime = systemTime() + 100000;
                 } else { //alarmCount % 10 < 5
-                    print("TEMPERATURE", 11, RED, 4);
+                    print("TEMPERATURE", RED, 4);
                     nextExecutionTime = systemTime() + 1000000;
                 }
             }
         } else {
-            print("TEMPERATURE", 11, NONE, 4);
+            print("TEMPERATURE", NONE, 4);
         }
     }
 }
@@ -1330,7 +1327,7 @@ void imageCaptureTask(void *imageCaptureData) {
         //Check if we need to record smaples
         if (*data->sampleIndex < IMAGE_CAPTURE_SAMPLES) {
 #if ARDUINO_ON
-            double d = analogRead(IMAGE_CAPTURE_PIN) * (5.0 / 1023.0) - 1.5;
+            signed int d = (analogRead(IMAGE_CAPTURE_PIN) * (5.0 / 1024.0) - 1.5) * 20;
             data->samples[*data->sampleIndex] = d;
             //Serial.println(d);
 #endif
@@ -1339,15 +1336,12 @@ void imageCaptureTask(void *imageCaptureData) {
         } else {
             if (nextPrintTime == 0 || systemTime() >= nextPrintTime) {
                 nextPrintTime = (unsigned long) (systemTime() + SECOND);
-                FFT.Windowing(data->samples, IMAGE_CAPTURE_SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-                FFT.Compute(data->samples, data->zeros, IMAGE_CAPTURE_SAMPLES, FFT_FORWARD);
-                FFT.ComplexToMagnitude(data->samples, data->zeros, IMAGE_CAPTURE_SAMPLES);
-                double peak = FFT.MajorPeak(data->samples, IMAGE_CAPTURE_SAMPLES, SAMPLING_FREQUENCY)/2;
-                //signed int maxFrequency = 7500 * optfft(data->samples, data->zeros) / 256;
+
+                signed int maxFrequency = 7500 * optfft(data->samples, data->zeros) / IMAGE_CAPTURE_SAMPLES;
 #if ARDUINO_ON
                 Serial.print("Max: ");
                 //long max = data->samples[maxFrequency];
-                Serial.println(peak);
+                Serial.println(maxFrequency);
 
 #endif
             }
@@ -1384,14 +1378,12 @@ int randomInteger(int low, int high) {
 }
 
 //Prints a string to the tft given text, the length of the text, a color, and a line number
-void print(char str[], int length, int color, int line) {
+void print(String str, int color, int line) {
     //To flash the selected line, you must print exact same string black then recolor
 #if ARDUINO_ON
-    for (int i = 0; i < length; i++) {
-        tft.setTextColor(color, NONE);
-        tft.setCursor(i * 12, line * 16);
-        tft.print(str[i]);
-    }
+    tft.setTextColor(color, NONE);
+    tft.setCursor(0, line * 16);
+    tft.print(str);
 #else
     printf("%s", str);
     printf(" color: %d - line: %d\n", color, line);
@@ -1405,7 +1397,7 @@ void printTaskTiming(char taskName[], unsigned long lastRunTime) {
         Serial.print(taskName);
         Serial.print(" - cycle delay: ");
         if (lastRunTime > 0) {
-            Serial.println((double)(systemTime() - lastRunTime) / 1000000.0, 4);
+            Serial.println((double) (systemTime() - lastRunTime) / 1000000.0, 4);
         } else {
             Serial.println(0.0, 4);
         }
